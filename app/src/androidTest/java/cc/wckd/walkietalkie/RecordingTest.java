@@ -53,7 +53,8 @@ public class RecordingTest {
   try(SpeechSession speech=new SpeechSession(new ModelStore(context).speech,(text,complete,latency)->{if(complete)transcript.append(text).append(" ");})){
    for(int pass=0;pass<3;pass++){
     transcript.setLength(0);speech.start();
-    for(int i=0;i<audio.length;i+=1600)speech.accept(Arrays.copyOfRange(audio,i,Math.min(audio.length,i+1600)));
+    // Batch the prerecorded fixture in one-second blocks. The microphone test exercises 100 ms reads.
+    for(int i=0;i<audio.length;i+=16000)speech.accept(Arrays.copyOfRange(audio,i,Math.min(audio.length,i+16000)));
     speech.finish();
     String result=transcript.toString().toLowerCase(Locale.ROOT);
     assertTrue("Pass "+pass+": "+result,result.contains("best of times"));
