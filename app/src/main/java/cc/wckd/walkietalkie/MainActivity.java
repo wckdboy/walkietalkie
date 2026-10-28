@@ -121,7 +121,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
  private boolean atBottom(){return scroll.getChildCount()==0||scroll.getChildAt(0).getBottom()-scroll.getHeight()-scroll.getScrollY()<dp(80);}
  private void scrollIfFollowing(){if(followFeed)scroll.post(()->scroll.fullScroll(View.FOCUS_DOWN));}
  private void updateMode(){switchingMode=true;modeButtons.check(recordingMode()?R.id.mode_record:R.id.mode_chat);switchingMode=false;}
- private void newSession(String kind){speechAvailable=true;stopPlayback();saveNow();engine.clear();session=new SessionStore.Session();session.kind=kind;getPreferences(0).edit().remove("session").apply();assistantEntry=null;assistantBubble=null;input.setText("");renderSession();state(engine.ready()?"ready":"missing","A fresh space for your thoughts.");}
+ private void newSession(String kind){speechAvailable=true;stopPlayback();saveNow();engine.clear();session=new SessionStore.Session();session.kind=kind;getPreferences(0).edit().remove("session").apply();assistantEntry=null;assistantBubble=null;input.setText("");hideKeyboard();renderSession();state(engine.ready()?"ready":"missing","A fresh space for your thoughts.");}
  private void renderSession(){
   conversation.removeAllViews();assistantBubble=null;assistantEntry=null;followFeed=true;
   int start=Math.max(0,session.entries.size()-120);
@@ -172,7 +172,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   if(state.equals("recording")||state.equals("listening")){engine.finishListening();state("finishing","Saving this part of your recording…");return;}
   if(state.equals("thinking")||state.equals("speaking")){engine.cancel();saveNow();state("ready","Paused. Your recording and replies are saved.");return;}
   if(!state.equals("ready")||!engine.ready())return;
-  stopPlayback();
+  stopPlayback();hideKeyboard();
   if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},8);return;}
   if(focus()){
    try{store.save(session);}catch(IOException error){error("Could not create recording: "+error.getMessage());return;}
@@ -307,7 +307,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
  @Override public void progress(String label,int percent){main.post(()->{if(isDestroyed())return;downloadLabel.setVisibility(View.VISIBLE);downloadLabel.setText(label);progress.setProgressCompat(Math.max(0,Math.min(100,percent)),true);});}
  @Override public void partial(String words){main.post(()->{if(isDestroyed()||isFinishing())return;if(state.equals("recording")||state.equals("listening")||state.equals("finishing")){live.setText(words);live.setVisibility(words==null||words.trim().isEmpty()?View.GONE:View.VISIBLE);scrollIfFollowing();}});}
  @Override public void segment(String words,long start,long end){main.post(()->{if(isDestroyed()||isFinishing())return;append(new SessionStore.Entry("transcript",words,start,end));session.durationMs=Math.max(session.durationMs,end);});}
- @Override public void elapsed(long duration){main.post(()->{if(isDestroyed()||isFinishing())return;session.durationMs=duration;timer.setText(SessionStore.stamp(duration));if(duration%5000<300)scheduleSave();});}
+ @Override public void elapsed(long duration){main.post(()->{if(isDestroyed()||isFinishing())return;session.durationMs=duration;timer.setText(SessionStore.stamp(duration));timer.setContentDescription("Recording duration "+SessionStore.stamp(duration));if(duration%5000<300)scheduleSave();});}
  @Override public void user(String words){main.post(()->{if(isDestroyed()||isFinishing())return;append(new SessionStore.Entry("user",words,session.durationMs,session.durationMs));assistantBubble=null;assistantEntry=null;live.setText("");live.setVisibility(View.GONE);});}
  @Override public void reply(String words){main.post(()->{if(isDestroyed()||isFinishing())return;if(assistantEntry==null)append(new SessionStore.Entry("assistant",words,session.durationMs,session.durationMs));else assistantEntry.text=words;pendingReply=words;main.removeCallbacks(renderReply);main.postDelayed(renderReply,40);});}
  @Override public void backend(String value){main.post(()->{if(isDestroyed()||isFinishing())return;actualBackend=value;});}

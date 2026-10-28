@@ -132,6 +132,7 @@ public class RecordingTest {
     assertTrue(((TextView)a.findViewById(R.id.detail)).getText().toString().contains("Audio is still recording"));
    });
    assertTrue("WAV capture must continue after SIGABRT in speech process",audio.length()>before+32000);
+   android.view.accessibility.AccessibilityNodeInfo window=instrumentation.getUiAutomation().getRootInActiveWindow();assertNotNull(window);assertEquals("A speech failure must not cover the recorder with a system crash dialog",context.getPackageName(),String.valueOf(window.getPackageName()));
    scenario.onActivity(a->a.findViewById(R.id.mic).performClick());awaitButton(scenario,"Resume");
    try(RandomAccessFile saved=new RandomAccessFile(audio,"r")){saved.seek(40);assertEquals(saved.length()-44,Integer.toUnsignedLong(Integer.reverseBytes(saved.readInt())));}
    // A new recording attempt must reconnect after the failed process.
