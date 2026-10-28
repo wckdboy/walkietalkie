@@ -1,0 +1,12 @@
+.gradle/
+**/build/
+**/.cxx/
+local.properties
+*.keystore
+*.gguf
+*.part
+third_party/llama.cpp-*/
+.idea/
+app/src/main/jniLibs/
+third_party/llama-include/
+.bootstrap/
