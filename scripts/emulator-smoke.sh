@@ -14,7 +14,7 @@ adb logcat -d > emulator-results/logcat.txt
 grep -q 'OK (1 test)' emulator-results/instrumentation.txt
 timeout 8m adb shell am instrument -w -r -e class cc.wckd.walkietalkie.RecordingTest cc.wckd.walkietalkie.test/androidx.test.runner.AndroidJUnitRunner | tee emulator-results/recording-tests.txt
 adb logcat -d >> emulator-results/logcat.txt
-grep -q 'OK (3 tests)' emulator-results/recording-tests.txt
+grep -q 'OK (4 tests)' emulator-results/recording-tests.txt
 adb shell am force-stop cc.wckd.walkietalkie
 adb shell cmd uimode night yes
 adb shell am start -W -n cc.wckd.walkietalkie/.MainActivity

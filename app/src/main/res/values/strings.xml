@@ -5,7 +5,7 @@
  <string name="hero_title">Room for every thought.</string>
  <string name="hero_subtitle">Record a thought. Capture a meeting.\nInvite a fresh perspective.</string>
  <string name="setup_title">Your voice. Your phone.</string>
- <string name="setup_body">Download your voice models once. Then talk, even in airplane mode.</string>
+ <string name="setup_body">Download once to record and chat offline. About 3 GB; keep 4 GB free.</string>
  <string name="setup_storage">About 2.5–3 GB · Keep 4 GB free\nUse Wi-Fi and keep the app open during setup.</string>
  <string name="setup_private">Stored privately on this device.</string>
  <string name="download">Download &amp; set up</string>

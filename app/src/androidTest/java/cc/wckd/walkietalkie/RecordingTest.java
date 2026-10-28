@@ -50,18 +50,19 @@ public class RecordingTest {
   float[] audio=new float[Math.min(20*16000,length/2/ratio)];
   for(int i=0;i<audio.length;i++){float sum=0;for(int j=0;j<ratio;j++)sum+=wav.getShort(data+(i*ratio+j)*2)/32768f;audio[i]=sum/ratio;}
   StringBuilder transcript=new StringBuilder();
-  try(SpeechSession speech=new SpeechSession(new ModelStore(context).speech,(text,complete,latency)->{if(complete)transcript.append(text).append(" ");})){
+  try(RemoteSpeech speech=new RemoteSpeech(context,new ModelStore(context).speech)){
    for(int pass=0;pass<3;pass++){
-    transcript.setLength(0);speech.start();
+    transcript.setLength(0);speech.call(SpeechService.START,new android.os.Bundle(),10);
     // Batch the prerecorded fixture in one-second blocks. The microphone test exercises 100 ms reads.
-    for(int i=0;i<audio.length;i+=16000)speech.accept(Arrays.copyOfRange(audio,i,Math.min(audio.length,i+16000)));
-    speech.finish();
+    for(int i=0;i<audio.length;i+=16000){android.os.Bundle data=new android.os.Bundle();data.putFloatArray("audio",Arrays.copyOfRange(audio,i,Math.min(audio.length,i+16000)));collect(speech.call(SpeechService.AUDIO,data,15),transcript);}
+    collect(speech.call(SpeechService.FINISH,new android.os.Bundle(),15),transcript);
     String result=transcript.toString().toLowerCase(Locale.ROOT);
     assertTrue("Pass "+pass+": "+result,result.contains("best of times"));
     assertTrue(result,result.contains("worst of times"));
    }
   }
  }
+ @SuppressWarnings("deprecation") private void collect(android.os.Bundle result,StringBuilder transcript){java.util.ArrayList<android.os.Bundle> lines=result.getParcelableArrayList("lines");if(lines!=null)for(android.os.Bundle line:lines)if(line.getBoolean("complete"))transcript.append(line.getString("text")).append(" ");}
  @Test public void bDeniedPermissionReportsErrorWithoutClosing() throws Exception {
   CountDownLatch ready=new CountDownLatch(1),failed=new CountDownLatch(1);
   AtomicReference<String> message=new AtomicReference<>("");
@@ -86,13 +87,13 @@ public class RecordingTest {
   context.getSharedPreferences("MainActivity",0).edit().clear().putInt("backend",1).commit();
   SessionStore store=new SessionStore(context);long previous=0;
   try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
-   awaitButton(scenario,"Start recording");
+   awaitButton(scenario,"Record");
    for(int pass=0;pass<3;pass++){
     scenario.onActivity(a->a.findViewById(R.id.mic).performClick());
-    awaitButton(scenario,"Pause recording");
+    awaitButton(scenario,"Pause");
     SystemClock.sleep(5000);
     scenario.onActivity(a->a.findViewById(R.id.mic).performClick());
-    awaitButton(scenario,"Resume recording");
+    awaitButton(scenario,"Resume");
     String id=context.getSharedPreferences("MainActivity",0).getString("session","");
     SessionStore.Session saved=store.read(id);
     assertTrue("Recording must append actual microphone PCM",saved.durationMs>previous+1000);previous=saved.durationMs;
@@ -103,18 +104,49 @@ public class RecordingTest {
    }
    scenario.onActivity(a->a.findViewById(R.id.mic).performClick());SystemClock.sleep(2000);
    scenario.moveToState(Lifecycle.State.CREATED);SystemClock.sleep(2000);
-   scenario.moveToState(Lifecycle.State.RESUMED);awaitButton(scenario,"Resume recording");
-   scenario.recreate();awaitButton(scenario,"Resume recording");
+   scenario.moveToState(Lifecycle.State.RESUMED);awaitButton(scenario,"Resume");
+   scenario.recreate();awaitButton(scenario,"Resume");
    scenario.onActivity(a->a.findViewById(R.id.mic).performClick());SystemClock.sleep(2000);
-   scenario.onActivity(a->a.findViewById(R.id.mic).performClick());awaitButton(scenario,"Resume recording");
+   scenario.onActivity(a->a.findViewById(R.id.mic).performClick());awaitButton(scenario,"Resume");
   }
+ }
+ @Test public void dNativeSpeechCrashKeepsRecordingAndSavesAudio() throws Exception {
+  context.getSharedPreferences("MainActivity",0).edit().remove("session").commit();
+  CountDownLatch bound=new CountDownLatch(1);AtomicReference<android.os.Messenger> service=new AtomicReference<>();
+  android.content.ServiceConnection connection=new android.content.ServiceConnection(){
+   public void onServiceConnected(android.content.ComponentName name,android.os.IBinder binder){service.set(new android.os.Messenger(binder));bound.countDown();}
+   public void onServiceDisconnected(android.content.ComponentName name){}
+  };
+  boolean connected=false;
+  try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+   awaitButton(scenario,"Record");scenario.onActivity(a->a.findViewById(R.id.mic).performClick());awaitButton(scenario,"Pause");
+   SystemClock.sleep(2500);
+   String id=context.getSharedPreferences("MainActivity",0).getString("session","");
+   SessionStore store=new SessionStore(context);File audio=store.audio(store.read(id));long before=audio.length();
+   connected=context.bindService(new android.content.Intent(context,SpeechService.class),connection,Context.BIND_AUTO_CREATE);
+   assertTrue(connected);assertTrue(bound.await(10,TimeUnit.SECONDS));
+   service.get().send(android.os.Message.obtain(null,SpeechService.TEST_CRASH));SystemClock.sleep(4000);
+   scenario.onActivity(a->{
+    assertEquals("Pause",((TextView)a.findViewById(R.id.mic)).getText().toString());
+    assertEquals(android.view.View.VISIBLE,a.findViewById(R.id.detail).getVisibility());
+    assertTrue(((TextView)a.findViewById(R.id.detail)).getText().toString().contains("Audio is still recording"));
+   });
+   assertTrue("WAV capture must continue after SIGABRT in speech process",audio.length()>before+32000);
+   scenario.onActivity(a->a.findViewById(R.id.mic).performClick());awaitButton(scenario,"Resume");
+   try(RandomAccessFile saved=new RandomAccessFile(audio,"r")){saved.seek(40);assertEquals(saved.length()-44,Integer.toUnsignedLong(Integer.reverseBytes(saved.readInt())));}
+   // A new recording attempt must reconnect after the failed process.
+   if(connected){context.unbindService(connection);connected=false;}
+   scenario.onActivity(a->a.findViewById(R.id.mic).performClick());awaitButton(scenario,"Pause");SystemClock.sleep(2000);
+   scenario.onActivity(a->{assertEquals(android.view.View.GONE,a.findViewById(R.id.detail).getVisibility());a.findViewById(R.id.mic).performClick();});
+   awaitButton(scenario,"Resume");
+  }finally{if(connected)context.unbindService(connection);}
  }
  private void awaitButton(ActivityScenario<MainActivity> scenario,String expected) {
   long deadline=SystemClock.elapsedRealtime()+90000;
   AtomicReference<String> value=new AtomicReference<>("");
   while(SystemClock.elapsedRealtime()<deadline){
    scenario.onActivity(a->{String status=((TextView)a.findViewById(R.id.status)).getText().toString();
-    assertFalse(((TextView)a.findViewById(R.id.detail)).getText().toString(),status.equals("Let’s get this sorted"));
+    assertFalse(((TextView)a.findViewById(R.id.detail)).getText().toString(),status.equals("Error"));
     value.set(a.findViewById(R.id.mic).isEnabled()?((TextView)a.findViewById(R.id.mic)).getText().toString():"Disabled");});
    if(value.get().equals(expected))return;SystemClock.sleep(200);
   }

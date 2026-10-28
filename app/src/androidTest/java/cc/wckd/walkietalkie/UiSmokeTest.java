@@ -40,7 +40,7 @@ public class UiSmokeTest {
    settle();
    // The bottom sheet owns its own window; locate its model button through the UI hierarchy.
    android.view.accessibility.AccessibilityNodeInfo tree=instrumentation.getUiAutomation().getRootInActiveWindow();
-   java.util.List<android.view.accessibility.AccessibilityNodeInfo> nodes=tree.findAccessibilityNodeInfosByText("Hugging Face models");
+   java.util.List<android.view.accessibility.AccessibilityNodeInfo> nodes=tree.findAccessibilityNodeInfosByText("Models");
    assertFalse(nodes.isEmpty());nodes.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
    shot("03-hugging-face-models");
    instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);settle();
@@ -62,7 +62,7 @@ public class UiSmokeTest {
    scenario.onActivity(a->a.findViewById(R.id.library).performClick());settle();shot("06-recording-library");
    instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);settle();
    scenario.onActivity(a->{a.state("recording","Listening quietly. Pause to invite WalkieTalkie in.");a.partial("And one more thing I want to remember…");a.elapsed(91000);});shot("07-recording-state-fixture");
-   scenario.onActivity(a->{assertEquals("Pause recording",((TextView)a.findViewById(R.id.mic)).getText().toString());a.elapsed(84000);a.state("ready","Saved here.");});
+   scenario.onActivity(a->{assertEquals("Pause",((TextView)a.findViewById(R.id.mic)).getText().toString());a.elapsed(84000);a.state("ready","Saved here.");});
   }
   settle();
   // Storage round-trip, transcript search, pin precedence and deletion use actual device files.

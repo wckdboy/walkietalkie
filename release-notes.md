@@ -1,14 +1,15 @@
-Recording reliability update for the OnePlus 15 demo.
+A quieter recorder, with speech-crash containment.
 
-- Recording no longer loads the GPU language model or Kokoro. They load when you request a reply.
-- Fixed native speech audio-buffer ownership, checked failed stream creation, and reset completion tracking across pause/resume.
-- Serialized native teardown across Activity recreation; guarded microphone startup, focus rejection, playback callbacks and null transcript updates.
-- Recover interrupted WAV headers and keep healthy library items accessible when another transcript is damaged.
-- Added Engine → Copy diagnostics. It includes Android's previous-exit reason and device details, with no recordings or transcript text.
-- Release is gated on unit/lint checks, real Moonshine transcription, denied microphone permission, actual Record-button capture with the default GPU preference, resume, backgrounding and recreation in an Android 15 emulator with animations enabled.
+- Compact timer and Record / Pause / Resume control at the bottom.
+- More space for the transcript; removed decorative onboarding, repeated status paragraphs and model details from the recording screen.
+- Keyboard appears in Chat only. Play, Summary, Ask and Share remain available after pausing.
+- Settings uses one engine selector; privacy details and diagnostics are available on request.
+- Moonshine runs in a separate process with a bounded decoding queue. If it stops or falls behind, WAV capture continues and the app shows a short warning. Resume attempts transcription again.
+- Native crash diagnostics now show process, signal and bounded stack metadata when Android supplies it. No audio, transcripts, raw memory or system logs are copied.
+- Android 16 emulator coverage includes real Moonshine transcription, denied microphone permission, pause/resume, backgrounding, recreation, and deliberate speech-process SIGABRT while recording. Unit/lint checks gate publication.
 
-The exact OnePlus crash has not been confirmed from a device log. The emulator cannot validate OnePlus GPU/NPU drivers. If recording still closes the app, reopen it and share Engine → Copy diagnostics.
+Your Reason 5 report identifies a native crash, but does not identify its native function. This release contains speech-process failures; physical OnePlus GPU/NPU reply drivers remain unverified.
 
-Install the APK below on Android 12+ arm64. This demo build uses a newly generated signing key: export any recordings/transcripts you want to keep before uninstalling the previous APK, then install this one. Uninstalling clears app data and downloaded models.
+Install the arm64 APK on Android 12+. **Export any recordings and transcripts you want to keep before uninstalling the previous demo.** CI currently generates a new demo signing key per build, so replacing a previous APK may require uninstalling it. Uninstalling removes local recordings and downloaded models.
 
-All speech and conversation inference stays on the phone after model download. No sub-50 ms performance claim is made.
+All inference stays on the phone after model download. No sub-50 ms performance claim is made.

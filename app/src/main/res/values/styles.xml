@@ -19,8 +19,8 @@
   <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
  </style>
  <style name="Widget.WalkieTalkie.Talk" parent="Widget.Material3Expressive.Button">
-  <item name="materialSizeOverlay">@style/SizeOverlay.Material3Expressive.Button.Large</item>
-  <item name="android:minHeight">80dp</item>
+  <item name="materialSizeOverlay">@style/SizeOverlay.Material3Expressive.Button.Medium</item>
+  <item name="android:minHeight">64dp</item>
  </style>
  <style name="Widget.WalkieTalkie.Action" parent="Widget.Material3Expressive.Button">
   <item name="materialSizeOverlay">@style/SizeOverlay.Material3Expressive.Button.Medium</item>

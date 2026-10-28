@@ -21,6 +21,7 @@ final class VoiceEngine {
   void metrics(String text);
   void backend(String text);
   void error(String message);
+  default void speechStatus(boolean available,String detail){}
  }
  final ModelStore store;
  private final Context context;
@@ -33,7 +34,7 @@ final class VoiceEngine {
  private final Object outputLock=new Object();
  private volatile AudioTrack output;
  private volatile boolean recording=false, closed=false, loaded=false;
- private SpeechSession stt;
+ private SpeechPipeline stt;
  private ai.moonshine.voice.TextToSpeech tts;
  private int loadedMode=-1, requestedMode=1;
  private String loadedPath="";
@@ -58,18 +59,18 @@ final class VoiceEngine {
     if(!store.speechReady()){ui.state("missing","Download the speech model once to record offline.");return;}
     requestedMode=mode;
     ui.state("loading","Opening the offline speech model…");
-    if(stt==null)stt=new SpeechSession(store.speech,this::onTranscript);
+
     ui.backend("Recording: Moonshine on CPU. Reply acceleration loads when needed.");
     loaded=true;
     if(id==epoch.get())ui.state("ready","Everything stays on this phone.");
    }catch(Throwable e){loaded=false;if(id==epoch.get())report(e);}
   });
  }
- private void onTranscript(String text,boolean complete,int latencyMs) {
+ private void onTranscript(String text,boolean complete,int latencyMs,long endMs) {
   if(captureEpoch!=epoch.get()||closed)return;
   if(!complete){liveLine=text;ui.partial(text);return;}
   sttMs=latencyMs;
-  if(dictating){ui.segment(text,segmentStart,captureMs);segmentStart=captureMs;ui.partial("");}
+  if(dictating){ui.segment(text,segmentStart,endMs);segmentStart=endMs;ui.partial("");}
   else{lastLine+=(lastLine.isEmpty()?"":" ")+text;recording=false;turnStart=SystemClock.elapsedRealtime();}
  }
  private void prepareReply(int id) throws Exception {
@@ -95,7 +96,7 @@ final class VoiceEngine {
   int id=epoch.incrementAndGet();recording=true;dictating=continuous;captureEpoch=id;
   worker.execute(()->{
    if(id!=epoch.get()||!loaded||closed){recording=false;return;}
-   AudioRecord mic=null;boolean streaming=false;WavWriter wav=null;lastLine="";liveLine="";sttMs=0;
+   AudioRecord mic=null;WavWriter wav=null;lastLine="";liveLine="";sttMs=0;
    try{
     if(context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED)throw new SecurityException("Microphone permission is required.");
     wav=new WavWriter(audio);captureMs=wav.durationMs();segmentStart=captureMs;ui.elapsed(captureMs);
@@ -104,26 +105,36 @@ final class VoiceEngine {
     mic=new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,Math.max(min,16000*2*4));
     if(mic.getState()!=AudioRecord.STATE_INITIALIZED)throw new IllegalStateException("Microphone could not start.");
     Diagnostics.phase(context,"Starting speech stream");
-    stt.start();streaming=true;Diagnostics.phase(context,"Opening microphone");mic.startRecording();
+    ui.speechStatus(true,"");
+    try {
+     stt=new SpeechPipeline(context,store.speech,(text,complete,latency,end)->{if(id==epoch.get())onTranscript(text,complete,latency,end);},
+      detail->{if(id==epoch.get()&&!closed){android.util.Log.w("WalkieTalkie","Speech unavailable: "+detail);ui.speechStatus(false,detail);}});
+     stt.start(captureMs);
+    }catch(Exception speechError){
+     if(stt!=null){stt.close();stt=null;}ui.speechStatus(false,speechError.toString());
+    }
+    if(id!=epoch.get()||!recording||closed){if(id==epoch.get()&&!closed)ui.state("ready","Paused");return;}
+    Diagnostics.phase(context,"Opening microphone");mic.startRecording();
     if(mic.getRecordingState()!=AudioRecord.RECORDSTATE_RECORDING)throw new IllegalStateException("Microphone access is unavailable. Check Android microphone privacy settings.");
     Diagnostics.phase(context,"Capturing audio");
     ui.state(continuous?"recording":"listening",continuous?"Listening quietly. Pause whenever you want to reflect.":"Speak naturally. Pause when you’re done.");
     short[] pcm=new short[1600];long start=SystemClock.elapsedRealtime(),lastTick=0,lastSave=0;
     while(recording&&id==epoch.get()&&(continuous||SystemClock.elapsedRealtime()-start<30000)){
      int n=mic.read(pcm,0,pcm.length);if(n<0)throw new IllegalStateException("Microphone read failed: "+n);
-     if(n>0){wav.write(pcm,n);captureMs=wav.durationMs();float[] samples=new float[n];for(int i=0;i<n;i++)samples[i]=pcm[i]/32768f;stt.accept(samples);}
+     if(n>0){wav.write(pcm,n);captureMs=wav.durationMs();float[] samples=new float[n];for(int i=0;i<n;i++)samples[i]=pcm[i]/32768f;if(stt!=null)stt.accept(samples,captureMs);}
      long now=SystemClock.elapsedRealtime();if(now-lastTick>=250){ui.elapsed(captureMs);lastTick=now;}
      if(now-lastSave>=2000){wav.checkpoint();lastSave=now;}
     }
     mic.stop();mic.release();mic=null;
-    stt.finish();streaming=false;wav.close();wav=null;ui.elapsed(captureMs);
+    wav.close();wav=null;ui.elapsed(captureMs);
+    if(stt!=null){stt.finish();stt.close();stt=null;}
     if(id!=epoch.get())return;
     if(continuous){ui.state("ready","Recording saved. Resume, or invite WalkieTalkie in.");return;}
     String text=lastLine.trim();if(text.isEmpty()){ui.state("ready","I didn’t catch that. Try speaking again.");return;}
     if(text.length()>1200)text=text.substring(0,1200);
     ui.user(text);respond(text,id);
    }catch(Throwable error){if(id==epoch.get())report(error);}
-   finally{recording=false;if(mic!=null){try{mic.stop();}catch(Exception ignored){}mic.release();}if(streaming){try{stt.close();}catch(Exception ignored){}stt=null;loaded=false;}if(wav!=null)try{wav.close();}catch(Exception ignored){}}
+   finally{recording=false;if(mic!=null){try{mic.stop();}catch(Exception ignored){}mic.release();}if(stt!=null){stt.close();stt=null;}if(wav!=null)try{wav.close();}catch(Exception ignored){}}
   });
  }
  void finishListening(){turnStart=SystemClock.elapsedRealtime();recording=false;}
