@@ -62,8 +62,9 @@ public class UiSmokeTest {
    scenario.onActivity(a->a.findViewById(R.id.library).performClick());settle();shot("06-recording-library");
    instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);settle();
    scenario.onActivity(a->{a.state("recording","Listening quietly. Pause to invite WalkieTalkie in.");a.partial("And one more thing I want to remember…");a.elapsed(91000);});shot("07-recording-state-fixture");
-   scenario.onActivity(a->{assertEquals("Pause recording",((TextView)a.findViewById(R.id.mic)).getText().toString());a.state("ready","Saved here.");});
+   scenario.onActivity(a->{assertEquals("Pause recording",((TextView)a.findViewById(R.id.mic)).getText().toString());a.elapsed(84000);a.state("ready","Saved here.");});
   }
+  settle();
   // Storage round-trip, transcript search, pin precedence and deletion use actual device files.
   SessionStore.Session restored=store.read(s.id);assertEquals(4,restored.entries.size());assertTrue(restored.pinned);assertEquals(84000,restored.durationMs);
   assertEquals(s.id,SessionStore.sorted(Arrays.asList(chat,restored),"focus blocks","all",0).get(0).id);

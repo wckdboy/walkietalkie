@@ -157,7 +157,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   return card;
  }
  private void append(SessionStore.Entry e){
-  session.entries.add(e);if(session.title.isBlank()&&!e.text.isBlank())session.title=e.text.replaceAll("\s+"," ").substring(0,Math.min(60,e.text.replaceAll("\s+"," ").length()));
+  session.entries.add(e);if(session.title.trim().isEmpty()&&!e.text.trim().isEmpty())session.title=e.text.replaceAll("\s+"," ").substring(0,Math.min(60,e.text.replaceAll("\s+"," ").length()));
   session.updated=System.currentTimeMillis();View card=entryCard(e);conversation.addView(card);if(e.role.equals("assistant")){assistantEntry=e;assistantBubble=(TextView)card.getTag();}
   if(ValueAnimator.areAnimatorsEnabled()){card.setAlpha(0);card.animate().alpha(1).setDuration(180).start();}
   updateSessionViews();scrollIfFollowing();scheduleSave();
@@ -257,7 +257,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
  }
  private void saveItem(SessionStore.Session item){SessionStore.Session copy=item.snapshot();disk.execute(()->{try{store.save(copy);main.post(()->toast("Saved"));}catch(IOException e){main.post(()->toast(e.getMessage()));}});}
  private void export(SessionStore.Session item){exportSession=item.snapshot();new MaterialAlertDialogBuilder(this).setTitle("Export").setItems(new String[]{"Transcript (.txt)","Recording audio (.wav)"},(d,which)->{if(which==1&&!store.audio(item).exists()){toast("This conversation has no recorded audio.");return;}Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(which==0?"text/plain":"audio/wav").putExtra(Intent.EXTRA_TITLE,item.displayTitle().replaceAll("[^a-zA-Z0-9 _-]","").trim()+(which==0?".txt":".wav"));startActivityForResult(intent,which==0?51:52);}).show();}
- @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if((request==51||request==52)&&result==RESULT_OK&&data!=null&&data.getData()!=null&&exportSession!=null){SessionStore.Session copy=exportSession;android.net.Uri uri=data.getData();disk.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot open destination");if(request==51)out.write(copy.exportText().getBytes(java.nio.charset.StandardCharsets.UTF_8));else try(InputStream in=new FileInputStream(store.audio(copy))){in.transferTo(out);}main.post(()->toast("Export saved"));}catch(IOException error){main.post(()->toast("Export failed: "+error.getMessage()));}});}}
+ @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if((request==51||request==52)&&result==RESULT_OK&&data!=null&&data.getData()!=null&&exportSession!=null){SessionStore.Session copy=exportSession;android.net.Uri uri=data.getData();disk.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot open destination");if(request==51)out.write(copy.exportText().getBytes(java.nio.charset.StandardCharsets.UTF_8));else try(InputStream in=new FileInputStream(store.audio(copy))){byte[] buffer=new byte[65536];int count;while((count=in.read(buffer))!=-1)out.write(buffer,0,count);}main.post(()->toast("Export saved"));}catch(IOException error){main.post(()->toast("Export failed: "+error.getMessage()));}});}}
  private void playPause(){if(player!=null){stopPlayback();releaseFocus();}else playFrom(0);}
  private void playFrom(long position){
   if(active()||!store.audio(session).exists())return;stopPlayback();if(!focus())return;
@@ -283,13 +283,13 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   setupTitle.setText(value.equals("error")?"Something needs attention":value.equals("loading")?"Opening your voice models":"Your voice. Your phone.");
   setupBody.setText(value.equals("error")?message:value.equals("loading")?"The first GPU load may take longer while it prepares the model.":getString(R.string.setup_body));
   composer.setVisibility(ready||active()?View.VISIBLE:View.GONE);thinking.setVisibility(value.equals("thinking")?View.VISIBLE:View.GONE);
-  if(busy||value.equals("recording")||value.equals("listening"))getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  if(busy||active())getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
   if(!active()){live.setText("");live.setVisibility(View.GONE);if(player==null)releaseFocus();}
   updateBackend();updateSessionViews();
   if(ready&&!previous.equals("ready")){saveNow();if(assistantBubble!=null)assistantBubble.announceForAccessibility("WalkieTalkie’s reply is ready.");}
  });}
  @Override public void progress(String label,int percent){main.post(()->{if(isDestroyed())return;downloadLabel.setText(label);progress.setProgressCompat(Math.max(0,Math.min(100,percent)),true);});}
- @Override public void partial(String words){main.post(()->{if(state.equals("recording")||state.equals("listening")||state.equals("finishing")){live.setText(words);live.setVisibility(words.isBlank()?View.GONE:View.VISIBLE);}});}
+ @Override public void partial(String words){main.post(()->{if(state.equals("recording")||state.equals("listening")||state.equals("finishing")){live.setText(words);live.setVisibility(words.trim().isEmpty()?View.GONE:View.VISIBLE);}});}
  @Override public void segment(String words,long start,long end){main.post(()->{append(new SessionStore.Entry("transcript",words,start,end));session.durationMs=Math.max(session.durationMs,end);});}
  @Override public void elapsed(long duration){main.post(()->{session.durationMs=duration;timer.setText(SessionStore.stamp(duration));if(duration%5000<300)scheduleSave();});}
  @Override public void user(String words){main.post(()->{append(new SessionStore.Entry("user",words,session.durationMs,session.durationMs));assistantBubble=null;assistantEntry=null;live.setText("");live.setVisibility(View.GONE);});}

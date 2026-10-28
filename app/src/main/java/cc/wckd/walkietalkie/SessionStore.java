@@ -20,7 +20,7 @@ final class SessionStore {
   boolean pinned=false;
   final List<Entry> entries=new ArrayList<>();
   Session snapshot(){Session s=new Session();s.id=id;s.title=title;s.kind=kind;s.created=created;s.updated=updated;s.durationMs=durationMs;s.pinned=pinned;for(Entry e:entries)s.entries.add(new Entry(e.role,e.text,e.startMs,e.endMs));return s;}
-  String displayTitle(){return title.isBlank()?(kind.equals("recording")?"Untitled recording":"New conversation"):title;}
+  String displayTitle(){return title.trim().isEmpty()?(kind.equals("recording")?"Untitled recording":"New conversation"):title;}
   String transcript(){StringBuilder b=new StringBuilder();for(Entry e:entries)if(e.role.equals("transcript"))b.append(e.text).append("
 ");return b.toString().trim();}
   String exportText(){

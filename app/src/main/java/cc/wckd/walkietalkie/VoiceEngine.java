@@ -69,7 +69,7 @@ final class VoiceEngine {
    if(line.text!=null&&!line.text.trim().isEmpty()){
     sttMs=line.lastTranscriptionLatencyMs;
     if(dictating){ui.segment(line.text.trim(),segmentStart,captureMs);segmentStart=captureMs;ui.partial("");}
-    else{lastLine+=(lastLine.isBlank()?"":" ")+line.text;recording=false;turnStart=SystemClock.elapsedRealtime();}
+    else{lastLine+=(lastLine.trim().isEmpty()?"":" ")+line.text;recording=false;turnStart=SystemClock.elapsedRealtime();}
    }
   }
  }
