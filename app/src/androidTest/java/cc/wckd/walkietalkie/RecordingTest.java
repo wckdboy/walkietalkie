@@ -54,7 +54,7 @@ public class RecordingTest {
    for(int pass=0;pass<3;pass++){
     transcript.setLength(0);speech.call(SpeechService.START,new android.os.Bundle(),10);
     // Batch the prerecorded fixture in one-second blocks. The microphone test exercises 100 ms reads.
-    for(int i=0;i<audio.length;i+=16000){android.os.Bundle data=new android.os.Bundle();data.putFloatArray("audio",Arrays.copyOfRange(audio,i,Math.min(audio.length,i+16000)));collect(speech.call(SpeechService.AUDIO,data,15),transcript);}
+    for(int i=0;i<audio.length;i+=16000){android.os.Bundle chunk=new android.os.Bundle();chunk.putFloatArray("audio",Arrays.copyOfRange(audio,i,Math.min(audio.length,i+16000)));collect(speech.call(SpeechService.AUDIO,chunk,15),transcript);}
     collect(speech.call(SpeechService.FINISH,new android.os.Bundle(),15),transcript);
     String result=transcript.toString().toLowerCase(Locale.ROOT);
     assertTrue("Pass "+pass+": "+result,result.contains("best of times"));
