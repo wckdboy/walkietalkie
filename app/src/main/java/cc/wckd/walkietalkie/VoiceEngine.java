@@ -25,15 +25,18 @@ final class VoiceEngine {
  final ModelStore store;
  private final Context context;
  private final Listener ui;
- private final ExecutorService worker=Executors.newSingleThreadExecutor();
+ // Serialize native ownership across Activity recreation, including queued teardown.
+ private static final ExecutorService worker=Executors.newSingleThreadExecutor();
+ private static volatile VoiceEngine llmOwner;
  private final AtomicInteger epoch=new AtomicInteger();
  private final Conversation history=new Conversation();
  private final Object outputLock=new Object();
  private volatile AudioTrack output;
  private volatile boolean recording=false, closed=false, loaded=false;
- private Transcriber stt;
+ private SpeechSession stt;
  private ai.moonshine.voice.TextToSpeech tts;
- private int loadedMode=-1;
+ private int loadedMode=-1, requestedMode=1;
+ private String loadedPath="";
  private String lastLine="", liveLine="";
  private volatile boolean dictating;
  private volatile long captureMs, segmentStart;
@@ -51,26 +54,37 @@ final class VoiceEngine {
    try {
     if(download) {ui.state("setup","Downloading models. Keep WalkieTalkie open.");store.install(ui::progress);}
     if(id!=epoch.get() || closed)return;
-    if(!store.ready()){ui.state("missing","Download the models once to use WalkieTalkie offline.");return;}
-    ui.state("loading","Opening models. The first GPU load compiles kernels.");
-    if(stt==null){stt=new Transcriber();stt.setUpdateInterval(0.2);stt.loadFromFiles(store.speech.getAbsolutePath(),JNI.MOONSHINE_MODEL_ARCH_TINY_STREAMING);stt.addListener(this::onTranscript);}
-    if(tts==null){tts=new ai.moonshine.voice.TextToSpeech(context).language("en_us").voice("kokoro_af_heart");tts.load();}
-    if(!loaded || loadedMode!=mode){NativeLlm.ensureLinked();String backend=NativeLlm.load(store.llm.getAbsolutePath(),4,mode,context.getApplicationInfo().nativeLibraryDir,context.getCacheDir().getAbsolutePath());loadedMode=mode;ui.backend(backend);ui.metrics("Moonshine + Kokoro on CPU");}
+    if(!store.speechReady()){ui.state("missing","Download the speech model once to record offline.");return;}
+    requestedMode=mode;
+    ui.state("loading","Opening the offline speech model…");
+    if(stt==null)stt=new SpeechSession(store.speech,this::onTranscript);
+    ui.backend("Recording: Moonshine on CPU. Reply acceleration loads when needed.");
     loaded=true;
     if(id==epoch.get())ui.state("ready","Everything stays on this phone.");
    }catch(Throwable e){loaded=false;report(e);}
   });
  }
- private void onTranscript(TranscriptEvent event) {
-  if(captureEpoch!=epoch.get())return;
-  if(event instanceof TranscriptEvent.LineTextChanged){liveLine=((TranscriptEvent.LineTextChanged)event).line.text;ui.partial(liveLine);}
-  if(event instanceof TranscriptEvent.LineCompleted){
-   TranscriptLine line=((TranscriptEvent.LineCompleted)event).line;
-   if(line.text!=null&&!line.text.trim().isEmpty()){
-    sttMs=line.lastTranscriptionLatencyMs;
-    if(dictating){ui.segment(line.text.trim(),segmentStart,captureMs);segmentStart=captureMs;ui.partial("");}
-    else{lastLine+=(lastLine.trim().isEmpty()?"":" ")+line.text;recording=false;turnStart=SystemClock.elapsedRealtime();}
-   }
+ private void onTranscript(String text,boolean complete,int latencyMs) {
+  if(captureEpoch!=epoch.get()||closed)return;
+  if(!complete){liveLine=text;ui.partial(text);return;}
+  sttMs=latencyMs;
+  if(dictating){ui.segment(text,segmentStart,captureMs);segmentStart=captureMs;ui.partial("");}
+  else{lastLine+=(lastLine.isEmpty()?"":" ")+text;recording=false;turnStart=SystemClock.elapsedRealtime();}
+ }
+ private void prepareReply(int id) throws Exception {
+  if(id!=epoch.get()||closed)throw new InterruptedException();
+  if(!store.ready())throw new IllegalStateException("Recording is ready. Download the reply models from Engine → Hugging Face models to use the assistant.");
+  if(llmOwner!=this||loadedMode!=requestedMode||!loadedPath.equals(store.llm.getAbsolutePath())) {
+   ui.state("thinking","Opening the reply model. The first GPU load compiles kernels.");
+   Diagnostics.phase(context,"Loading reply backend "+requestedMode);
+   NativeLlm.ensureLinked();
+   String backend=NativeLlm.load(store.llm.getAbsolutePath(),4,requestedMode,context.getApplicationInfo().nativeLibraryDir,context.getCacheDir().getAbsolutePath());
+   llmOwner=this;loadedMode=requestedMode;loadedPath=store.llm.getAbsolutePath();ui.backend(backend);
+  }
+  if(id!=epoch.get()||closed)throw new InterruptedException();
+  if(tts==null) {
+   ai.moonshine.voice.TextToSpeech next=new ai.moonshine.voice.TextToSpeech(context).language("en_us").voice("kokoro_af_heart");
+   try{next.load();tts=next;}catch(Throwable error){next.close();throw error;}
   }
  }
  void listen(File audio){capture(audio,false);}
@@ -78,32 +92,36 @@ final class VoiceEngine {
  private void capture(File audio,boolean continuous){
   int id=epoch.incrementAndGet();recording=true;dictating=continuous;captureEpoch=id;
   worker.execute(()->{
-   if(id!=epoch.get()||!loaded)return;
-   AudioRecord mic=null;int stream=-1;WavWriter wav=null;lastLine="";liveLine="";sttMs=0;
+   if(id!=epoch.get()||!loaded||closed){recording=false;return;}
+   AudioRecord mic=null;boolean streaming=false;WavWriter wav=null;lastLine="";liveLine="";sttMs=0;
    try{
     if(context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED)throw new SecurityException("Microphone permission is required.");
     wav=new WavWriter(audio);captureMs=wav.durationMs();segmentStart=captureMs;ui.elapsed(captureMs);
     int min=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
-    mic=new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,Math.max(min,16000));
+    if(min<=0)throw new IllegalStateException("This microphone does not support 16 kHz PCM.");
+    mic=new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,Math.max(min,16000*2*4));
     if(mic.getState()!=AudioRecord.STATE_INITIALIZED)throw new IllegalStateException("Microphone could not start.");
-    stream=stt.createStream();stt.startStream(stream);mic.startRecording();
+    Diagnostics.phase(context,"Starting speech stream");
+    stt.start();streaming=true;Diagnostics.phase(context,"Opening microphone");mic.startRecording();
+    if(mic.getRecordingState()!=AudioRecord.RECORDSTATE_RECORDING)throw new IllegalStateException("Microphone access is unavailable. Check Android microphone privacy settings.");
+    Diagnostics.phase(context,"Capturing audio");
     ui.state(continuous?"recording":"listening",continuous?"Listening quietly. Pause whenever you want to reflect.":"Speak naturally. Pause when you’re done.");
-    short[] pcm=new short[320];long start=SystemClock.elapsedRealtime(),lastTick=0,lastSave=0;
+    short[] pcm=new short[1600];long start=SystemClock.elapsedRealtime(),lastTick=0,lastSave=0;
     while(recording&&id==epoch.get()&&(continuous||SystemClock.elapsedRealtime()-start<30000)){
      int n=mic.read(pcm,0,pcm.length);if(n<0)throw new IllegalStateException("Microphone read failed: "+n);
-     if(n>0){wav.write(pcm,n);captureMs=wav.durationMs();float[] samples=new float[n];for(int i=0;i<n;i++)samples[i]=pcm[i]/32768f;stt.addAudioToStream(stream,samples,16000);}
+     if(n>0){wav.write(pcm,n);captureMs=wav.durationMs();float[] samples=new float[n];for(int i=0;i<n;i++)samples[i]=pcm[i]/32768f;stt.accept(samples);}
      long now=SystemClock.elapsedRealtime();if(now-lastTick>=250){ui.elapsed(captureMs);lastTick=now;}
      if(now-lastSave>=2000){wav.checkpoint();lastSave=now;}
     }
     mic.stop();mic.release();mic=null;
-    stt.stopStream(stream);stt.freeStream(stream);stream=-1;wav.close();wav=null;ui.elapsed(captureMs);
+    stt.finish();streaming=false;wav.close();wav=null;ui.elapsed(captureMs);
     if(id!=epoch.get())return;
     if(continuous){ui.state("ready","Recording saved. Resume, or invite WalkieTalkie in.");return;}
     String text=lastLine.trim();if(text.isEmpty()){ui.state("ready","I didn’t catch that. Try speaking again.");return;}
     if(text.length()>1200)text=text.substring(0,1200);
     ui.user(text);respond(text,id);
    }catch(Throwable error){if(id==epoch.get())report(error);}
-   finally{recording=false;if(mic!=null){try{mic.stop();}catch(Exception ignored){}mic.release();}if(stream>=0)try{stt.freeStream(stream);}catch(Exception ignored){}if(wav!=null)try{wav.close();}catch(Exception ignored){}}
+   finally{recording=false;if(mic!=null){try{mic.stop();}catch(Exception ignored){}mic.release();}if(streaming){try{stt.close();}catch(Exception ignored){}stt=null;loaded=false;}if(wav!=null)try{wav.close();}catch(Exception ignored){}}
   });
  }
  void finishListening(){turnStart=SystemClock.elapsedRealtime();recording=false;}
@@ -113,6 +131,7 @@ final class VoiceEngine {
   worker.execute(()->{
    try{
     if(!loaded||id!=epoch.get())return;
+    prepareReply(id);
     String notes=transcript;
     // Summarize every chunk, then recursively merge notes to fit the 2,048-token context.
     while(notes.length()>3000){
@@ -138,6 +157,8 @@ final class VoiceEngine {
  }
  private void respond(String text,int id) throws Exception {
   if(id!=epoch.get())return;
+  prepareReply(id);
+  if(id!=epoch.get()||closed)return;
   ui.state("thinking","Finding the words…");ui.reply("");
   AtomicBoolean generationDone=new AtomicBoolean(false);
   AtomicReference<Throwable> audioError=new AtomicReference<>();
@@ -166,7 +187,8 @@ final class VoiceEngine {
       firstSound.compareAndSet(-1,SystemClock.elapsedRealtime()-turnStart);off+=n;frames+=n;
      }
     }
-    if(track!=null)while(id==epoch.get() && (track.getPlaybackHeadPosition()&0xffffffffL)<frames)Thread.sleep(10);
+    long drainDeadline=SystemClock.elapsedRealtime()+10000;
+    if(track!=null)while(id==epoch.get() && (track.getPlaybackHeadPosition()&0xffffffffL)<frames){if(SystemClock.elapsedRealtime()>drainDeadline)throw new IllegalStateException("Audio playback stalled.");Thread.sleep(10);}
    }catch(Throwable e){audioError.set(e);}
    finally{ synchronized(outputLock){if(track!=null){try{track.pause();track.flush();}catch(Exception ignored){}track.release();}if(output==track)output=null;}}
   },"walkietalkie-audio");
@@ -188,8 +210,11 @@ final class VoiceEngine {
   ui.metrics("STT decode "+(sttMs>0?sttMs+" ms":"—")+"  ·  first token "+firstToken.get()+" ms\nTTS chunk "+synthMs.get()+" ms  ·  first audio queued "+firstSound.get()+" ms");
   ui.state("ready","Your turn. No connection needed.");
  }
- void cancel(){epoch.incrementAndGet();recording=false;try{NativeLlm.cancel();}catch(UnsatisfiedLinkError ignored){}synchronized(outputLock){if(output!=null)try{output.pause();output.flush();}catch(Exception ignored){}}}
+ void cancel(){epoch.incrementAndGet();recording=false;if(llmOwner==this)try{NativeLlm.cancel();}catch(UnsatisfiedLinkError ignored){}synchronized(outputLock){if(output!=null)try{output.pause();output.flush();}catch(Exception ignored){}}}
  void clear(){cancel();worker.execute(()->history.clear());}
- void close(){closed=true;cancel();store.cancel();worker.shutdownNow();new Thread(()->{try{worker.awaitTermination(120,TimeUnit.SECONDS);}catch(InterruptedException ignored){}if(worker.isTerminated()){if(stt!=null)stt.close();if(tts!=null)tts.close();try{NativeLlm.close();}catch(UnsatisfiedLinkError ignored){}}},"walkietalkie-release").start();}
- private void report(Throwable e){String detail=e.getMessage();Throwable cause=e.getCause();if(cause!=null&&cause.getMessage()!=null)detail+=" · "+cause.getMessage();ui.error(detail==null?e.getClass().getSimpleName():detail);}
+ void close(){
+  if(closed)return;closed=true;cancel();store.cancel();
+  worker.execute(()->{if(stt!=null){stt.close();stt=null;}if(tts!=null){tts.close();tts=null;}if(llmOwner==this){NativeLlm.close();llmOwner=null;}});
+ }
+ private void report(Throwable e){if(closed)return;android.util.Log.e("WalkieTalkie","Voice engine failed",e);String detail=e.getMessage();Throwable cause=e.getCause();if(cause!=null&&cause.getMessage()!=null)detail+=" · "+cause.getMessage();ui.error(detail==null?e.getClass().getSimpleName():detail);}
 }

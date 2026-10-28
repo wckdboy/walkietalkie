@@ -168,8 +168,8 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   SessionStore.Session copy=session.snapshot();getPreferences(0).edit().putString("session",copy.id).apply();
   if(!disk.isShutdown())disk.execute(()->{try{store.save(copy);}catch(IOException error){main.post(()->{toast("Could not save: "+error.getMessage());if(state.equals("recording"))engine.finishListening();});}});
  }
- private boolean focus(){if(hasFocus)return true;hasFocus=audioManager.requestAudioFocus(audioFocus)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;if(!hasFocus)detail.setText("Audio is busy in another app. Try again.");return hasFocus;}
- private void releaseFocus(){if(hasFocus){audioManager.abandonAudioFocusRequest(audioFocus);hasFocus=false;}}
+ private boolean focus(){if(hasFocus)return true;try{hasFocus=audioManager.requestAudioFocus(audioFocus)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;}catch(RuntimeException e){hasFocus=false;}if(!hasFocus)detail.setText("Audio is busy or unavailable. Return to the app and try again.");return hasFocus;}
+ private void releaseFocus(){if(hasFocus){try{audioManager.abandonAudioFocusRequest(audioFocus);}catch(RuntimeException ignored){}hasFocus=false;}}
  private void micAction(){
   if(state.equals("recording")||state.equals("listening")){engine.finishListening();state("finishing","Saving this part of your recording…");return;}
   if(state.equals("thinking")||state.equals("speaking")){engine.cancel();saveNow();state("ready","Paused. Your recording and replies are saved.");return;}
@@ -179,6 +179,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   if(focus()){
    try{store.save(session);}catch(IOException error){error("Could not create recording: "+error.getMessage());return;}
    getPreferences(0).edit().putString("session",session.id).apply();
+   Diagnostics.phase(this,"Record tapped · backend "+mode);
    state(recordingMode()?"recording":"listening","Opening microphone…");
    if(recordingMode())engine.record(store.audio(session));else engine.listen(store.audio(session));
   }
@@ -205,8 +206,9 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   MaterialSwitch fillers=new MaterialSwitch(this);fillers.setText("Conversational fillers");fillers.setMinHeight(dp(56));fillers.setChecked(engine.fillers);panel.addView(fillers);
   panel.addView(text("Short, varied fillers make spoken replies feel more natural.",com.google.android.material.R.style.TextAppearance_Material3_BodyMedium));space(panel,16);
   MaterialButton models=button("Hugging Face models",com.google.android.material.R.style.Widget_Material3Expressive_Button_TonalButton);models.setId(R.id.models);panel.addView(models);
-  TextView diagnostic=text(actualBackend+"\n"+engine.store.model.label()+"\n\n"+diagnostics+"\n\nAudio and transcripts stay on this phone. Recording pauses when you leave the app. Speaker separation is not inferred.",com.google.android.material.R.style.TextAppearance_Material3_BodySmall);diagnostic.setTextIsSelectable(true);diagnostic.setVisibility(View.GONE);
-  MaterialButton stats=button("Device & privacy details",com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);stats.setOnClickListener(v->diagnostic.setVisibility(diagnostic.getVisibility()==View.GONE?View.VISIBLE:View.GONE));panel.addView(stats);panel.addView(diagnostic);space(panel,16);
+  TextView diagnostic=text(Diagnostics.describe(this)+"\n\n"+actualBackend+"\n"+engine.store.model.label()+"\n\n"+diagnostics+"\n\nAudio and transcripts stay on this phone. Recording pauses when you leave the app. Speaker separation is not inferred.",com.google.android.material.R.style.TextAppearance_Material3_BodySmall);diagnostic.setTextIsSelectable(true);diagnostic.setVisibility(View.GONE);
+  MaterialButton stats=button("Device & privacy details",com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);stats.setOnClickListener(v->diagnostic.setVisibility(diagnostic.getVisibility()==View.GONE?View.VISIBLE:View.GONE));panel.addView(stats);panel.addView(diagnostic);
+  MaterialButton copy=button("Copy diagnostics",com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);copy.setOnClickListener(v->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("WalkieTalkie diagnostics",diagnostic.getText()));toast("Diagnostics copied. No transcript or audio included.");});panel.addView(copy);space(panel,16);
   MaterialButton apply=button("Apply settings",R.style.Widget_WalkieTalkie_Action);panel.addView(apply);
   BottomSheetDialog dialog=sheet("Make it yours",panel);
   models.setOnClickListener(v->{dialog.dismiss();models();});
@@ -263,11 +265,11 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
  private void playPause(){if(player!=null){stopPlayback();releaseFocus();}else playFrom(0);}
  private void playFrom(long position){
   if(active()||!store.audio(session).exists())return;stopPlayback();if(!focus())return;
-  try{player=new MediaPlayer();player.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());player.setDataSource(store.audio(session).getAbsolutePath());player.setOnPreparedListener(p->{p.seekTo(position,MediaPlayer.SEEK_CLOSEST);p.start();play.setText("Stop playback");});player.setOnCompletionListener(p->{stopPlayback();releaseFocus();});player.setOnErrorListener((p,w,e)->{stopPlayback();releaseFocus();toast("Could not play this recording.");return true;});player.prepareAsync();}catch(IOException error){stopPlayback();releaseFocus();toast(error.getMessage());}
+  try{player=new MediaPlayer();player.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());player.setDataSource(store.audio(session).getAbsolutePath());player.setOnPreparedListener(p->{if(p!=player||isDestroyed())return;p.seekTo(position,MediaPlayer.SEEK_CLOSEST);p.start();play.setText("Stop playback");});player.setOnCompletionListener(p->{stopPlayback();releaseFocus();});player.setOnErrorListener((p,w,e)->{stopPlayback();releaseFocus();toast("Could not play this recording.");return true;});player.prepareAsync();}catch(IOException|RuntimeException error){stopPlayback();releaseFocus();toast(error.getMessage());}
  }
  private void stopPlayback(){if(player!=null){player.release();player=null;}if(play!=null)play.setText("Play recording");}
  private void toast(String message){if(!isDestroyed())Toast.makeText(this,message,Toast.LENGTH_LONG).show();}
- private void updateBackend(){backendLabel.setText(engine.store.model.label()+" · "+switch(mode){case 0->"CPU";case 2->"NPU";case 3->"GPU + NPU";default->"Adreno GPU";});}
+ private void updateBackend(){if(recordingMode()){backendLabel.setText("Offline recording · Moonshine CPU");return;}backendLabel.setText(engine.store.model.label()+" · "+switch(mode){case 0->"CPU";case 2->"NPU";case 3->"GPU + NPU";default->"Adreno GPU";});}
  @Override public void state(String value,String message){runOnUiThread(()->{
   if(isDestroyed())return;String previous=state;state=value;detail.setText(message);
   if(value.equals("loading"))getPreferences(0).edit().putBoolean("load_in_progress",true).apply();
@@ -283,7 +285,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   progress.setVisibility(busy?View.VISIBLE:View.GONE);progress.setIndeterminate(value.equals("loading"));
   install.setVisibility(busy?View.GONE:View.VISIBLE);install.setEnabled(value.equals("missing")||value.equals("error"));install.setText(value.equals("error")?"Retry setup / load":"Download & set up");
   setupTitle.setText(value.equals("error")?"Something needs attention":value.equals("loading")?"Opening your voice models":"Your voice. Your phone.");
-  setupBody.setText(value.equals("error")?message:value.equals("loading")?"The first GPU load may take longer while it prepares the model.":getString(R.string.setup_body));
+  setupBody.setText(value.equals("error")?message:value.equals("loading")?"Preparing speech recognition. Reply models load when you invite the assistant.":getString(R.string.setup_body));
   composer.setVisibility(ready||active()?View.VISIBLE:View.GONE);thinking.setVisibility(value.equals("thinking")?View.VISIBLE:View.GONE);
   if(busy||active())getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
   if(!active()){live.setText("");live.setVisibility(View.GONE);if(player==null)releaseFocus();}
@@ -291,14 +293,14 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   if(ready&&!previous.equals("ready")){saveNow();if(assistantBubble!=null)assistantBubble.announceForAccessibility("WalkieTalkie’s reply is ready.");}
  });}
  @Override public void progress(String label,int percent){main.post(()->{if(isDestroyed())return;downloadLabel.setText(label);progress.setProgressCompat(Math.max(0,Math.min(100,percent)),true);});}
- @Override public void partial(String words){main.post(()->{if(state.equals("recording")||state.equals("listening")||state.equals("finishing")){live.setText(words);live.setVisibility(words.trim().isEmpty()?View.GONE:View.VISIBLE);}});}
- @Override public void segment(String words,long start,long end){main.post(()->{append(new SessionStore.Entry("transcript",words,start,end));session.durationMs=Math.max(session.durationMs,end);});}
- @Override public void elapsed(long duration){main.post(()->{session.durationMs=duration;timer.setText(SessionStore.stamp(duration));if(duration%5000<300)scheduleSave();});}
- @Override public void user(String words){main.post(()->{append(new SessionStore.Entry("user",words,session.durationMs,session.durationMs));assistantBubble=null;assistantEntry=null;live.setText("");live.setVisibility(View.GONE);});}
- @Override public void reply(String words){main.post(()->{if(assistantEntry==null)append(new SessionStore.Entry("assistant",words,session.durationMs,session.durationMs));else assistantEntry.text=words;pendingReply=words;main.removeCallbacks(renderReply);main.postDelayed(renderReply,40);});}
- @Override public void backend(String value){main.post(()->{actualBackend=value;updateBackend();});}
+ @Override public void partial(String words){main.post(()->{if(isDestroyed()||isFinishing())return;if(state.equals("recording")||state.equals("listening")||state.equals("finishing")){live.setText(words);live.setVisibility(words==null||words.trim().isEmpty()?View.GONE:View.VISIBLE);}});}
+ @Override public void segment(String words,long start,long end){main.post(()->{if(isDestroyed()||isFinishing())return;append(new SessionStore.Entry("transcript",words,start,end));session.durationMs=Math.max(session.durationMs,end);});}
+ @Override public void elapsed(long duration){main.post(()->{if(isDestroyed()||isFinishing())return;session.durationMs=duration;timer.setText(SessionStore.stamp(duration));if(duration%5000<300)scheduleSave();});}
+ @Override public void user(String words){main.post(()->{if(isDestroyed()||isFinishing())return;append(new SessionStore.Entry("user",words,session.durationMs,session.durationMs));assistantBubble=null;assistantEntry=null;live.setText("");live.setVisibility(View.GONE);});}
+ @Override public void reply(String words){main.post(()->{if(isDestroyed()||isFinishing())return;if(assistantEntry==null)append(new SessionStore.Entry("assistant",words,session.durationMs,session.durationMs));else assistantEntry.text=words;pendingReply=words;main.removeCallbacks(renderReply);main.postDelayed(renderReply,40);});}
+ @Override public void backend(String value){main.post(()->{if(isDestroyed()||isFinishing())return;actualBackend=value;updateBackend();});}
  @Override public void metrics(String value){main.post(()->diagnostics=value);}
- @Override public void error(String message){state("error",message);main.post(()->{saveNow();downloadLabel.setText("Your saved recordings remain in the library.");});}
+ @Override public void error(String message){state("error",message);main.post(()->{if(isDestroyed()||isFinishing())return;saveNow();downloadLabel.setText("Your saved recordings remain in the library.");});}
  @Override protected void onStop(){visible=false;stopPlayback();if(engine!=null){if(state.equals("recording")){engine.finishListening();state("finishing","Saving before leaving the app…");}else if(active()){engine.cancel();state("ready","Paused. Your words are saved.");}}saveNow();releaseFocus();super.onStop();}
  @Override protected void onStart(){super.onStart();visible=true;}
  @Override protected void onDestroy(){saveNow();main.removeCallbacksAndMessages(null);if(engine!=null)engine.close();disk.shutdown();super.onDestroy();}

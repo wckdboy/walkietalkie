@@ -47,7 +47,7 @@ jobs:
           arch: x86_64
           profile: pixel_7
           ram-size: 4096M
-          disable-animations: true
+          disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: bash scripts/emulator-smoke.sh
       - uses: actions/upload-artifact@v4

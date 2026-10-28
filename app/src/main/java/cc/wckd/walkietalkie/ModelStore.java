@@ -29,6 +29,7 @@ final class ModelStore {
   context.getSharedPreferences("models",0).edit().putInt("selected",selected).apply();
  }
  boolean downloaded(int index) {ModelCatalog.Model m=ModelCatalog.MODELS[index];File f=new File(context.getNoBackupFilesDir(),m.file());return f.length()==m.bytes()&&new File(f+".verified").exists();}
+ boolean speechReady(){return new AssetDownloader().isModelPresent(speech,STT);}
  boolean ready() {
   AssetDownloader d=new AssetDownloader();
   return llm.length()==model.bytes() && new File(llm+".verified").exists() && d.isModelPresent(speech,STT) && d.isModelPresent(voice,TTS);

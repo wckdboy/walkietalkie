@@ -27,3 +27,12 @@ with tarfile.open(archive) as package:
 if not (ROOT / "demo.keystore").exists():
     subprocess.run(["keytool", "-genkeypair", "-keystore", str(ROOT / "demo.keystore"), "-storepass", "android", "-keypass", "android", "-alias", "murmur", "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000", "-dname", "CN=WalkieTalkie Demo", "-noprompt"], check=True)
 print("Ready. Run ./gradlew assembleDebug testDebugUnitTest lintDebug")
+
+# Public-domain Dickens reading from the upstream Android integration tests.
+# Pinned Git blob identity; used only in the instrumentation APK.
+fixture = ROOT / "app/src/androidTest/assets/two_cities.wav"
+fixture.parent.mkdir(parents=True, exist_ok=True)
+urllib.request.urlretrieve("https://raw.githubusercontent.com/moonshine-ai/moonshine/v0.1.5/language-bindings/android/java/androidTest/assets/two_cities.wav", fixture)
+data = fixture.read_bytes()
+if hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest() != "0cc95ad2e030e08338de52c04ab133fe2afe1bba":
+    raise SystemExit("Test audio checksum mismatch")

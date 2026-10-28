@@ -11,11 +11,13 @@ final class WavWriter implements AutoCloseable {
  private long bytes;
  WavWriter(File target) throws IOException {
   file = new RandomAccessFile(target, "rw");
-  bytes = Math.max(0, file.length() - 44);
-  bytes -= bytes % 2;
-  file.setLength(44 + bytes);
-  header();
-  file.seek(44 + bytes);
+  try{
+   bytes = Math.max(0, file.length() - 44);
+   bytes -= bytes % 2;
+   file.setLength(44 + bytes);
+   header();
+   file.seek(44 + bytes);
+  }catch(IOException error){file.close();throw error;}
  }
  void write(short[] pcm, int count) throws IOException {
   if (bytes + count * 2L > 0xffffffffL - 36) throw new IOException("Recording reached the WAV size limit. Start a new recording.");
