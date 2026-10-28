@@ -103,7 +103,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   status.setTextColor(color(com.google.android.material.R.attr.colorOnSecondaryContainer));
   LinearLayout steps=findViewById(R.id.model_steps);
   String[] labels={"Listen","Think","Speak"};
-  for(int i=0;i<3;i++){LinearLayout step=column();TextView n=text("0"+(i+1),com.google.android.material.R.style.TextAppearance_Material3_TitleLarge_Emphasized);n.setTextColor(color(com.google.android.material.R.attr.colorPrimary));step.addView(n);space(step,4);step.addView(text(labels[i],com.google.android.material.R.style.TextAppearance_Material3_LabelLarge));steps.addView(step,new LinearLayout.LayoutParams(0,-2,1));}
+  for(int i=0;i<3;i++){LinearLayout step=column();TextView n=text("0"+(i+1),com.google.android.material.R.style.TextAppearance_Material3_TitleLarge_Emphasized);n.setTextColor(color(androidx.appcompat.R.attr.colorPrimary));step.addView(n);space(step,4);step.addView(text(labels[i],com.google.android.material.R.style.TextAppearance_Material3_LabelLarge));steps.addView(step,new LinearLayout.LayoutParams(0,-2,1));}
   findViewById(R.id.settings).setOnClickListener(v->{if(editable())settings();else toast("Pause or finish the current turn first.");});
   findViewById(R.id.library).setOnClickListener(v->{if(editable())library();else toast("Pause or finish before opening your library.");});
   findViewById(R.id.new_chat).setOnClickListener(v->{if(editable())newSession(recordingMode()?"recording":"chat");else toast("Pause or finish the current turn first.");});
