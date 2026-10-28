@@ -112,7 +112,7 @@ public class RecordingTest {
   while(SystemClock.elapsedRealtime()<deadline){
    scenario.onActivity(a->{String status=((TextView)a.findViewById(R.id.status)).getText().toString();
     assertFalse(((TextView)a.findViewById(R.id.detail)).getText().toString(),status.equals("Let’s get this sorted"));
-    value.set(((TextView)a.findViewById(R.id.mic)).getText().toString());});
+    value.set(a.findViewById(R.id.mic).isEnabled()?((TextView)a.findViewById(R.id.mic)).getText().toString():"Disabled");});
    if(value.get().equals(expected))return;SystemClock.sleep(200);
   }
   fail("Expected "+expected+", got "+value.get());

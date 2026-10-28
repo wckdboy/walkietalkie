@@ -29,6 +29,7 @@ final class SessionStore {
   }
  }
  private final File directory;
+ volatile int unreadableCount;
  SessionStore(Context context){directory=new File(context.getNoBackupFilesDir(),"sessions");if(!directory.isDirectory()&&!directory.mkdirs())throw new IllegalStateException("Cannot open recording storage.");}
  File audio(Session s){return new File(directory,s.id+".wav");}
  private File metadata(String id){if(!id.matches("[0-9a-fA-F-]{36}"))throw new IllegalArgumentException("Invalid recording ID");return new File(directory,id+".json");}
@@ -57,7 +58,8 @@ final class SessionStore {
   File[] files=directory.listFiles((dir,name)->name.endsWith(".json"));
   if(files==null)throw new IOException("Cannot read recording library.");
   List<Session> result=new ArrayList<>();
-  for(File file:files)result.add(read(file.getName().replace(".json","")));
+  unreadableCount=0;
+  for(File file:files){try{result.add(read(file.getName().replace(".json","")));}catch(IOException|IllegalArgumentException error){unreadableCount++;}}
   return result;
  }
  synchronized void delete(Session s) throws IOException {
