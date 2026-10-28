@@ -9,3 +9,7 @@ WalkieTalkie's MIT license covers original application code, not upstream librar
 - AndroidX, Material Components, OkHttp, Okio, Kotlin standard library: Apache-2.0, resolved through Gradle.
 
 The Hexagon device code comes from the official llama.cpp release. The phone supplies OEM FastRPC and OpenCL drivers; these are not redistributed here.
+
+## UI and optional smaller models
+
+Material Components for Android 1.14.0 and AndroidX Test are Apache-2.0. Qwen2.5-0.5B-Instruct-GGUF and Qwen2.5-1.5B-Instruct-GGUF are Apache-2.0; their model cards are linked in the README. The existing Qwen Research License notice remains applicable to 3B.

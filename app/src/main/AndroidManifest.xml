@@ -4,7 +4,7 @@
  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
  <uses-feature android:name="android.hardware.microphone" android:required="false"/>
  <application android:label="WalkieTalkie" android:icon="@drawable/ic_walkietalkie" android:theme="@style/AppTheme" android:allowBackup="false" android:supportsRtl="true" android:usesCleartextTraffic="false">
-  <uses-native-library android:name="libOpenCL.so" android:required="false"/><uses-native-library android:name="libcdsprpc.so" android:required="false"/><uses-native-library android:name="libadsprpc.so" android:required="false"/><activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
+  <uses-native-library android:name="libOpenCL.so" android:required="false"/><uses-native-library android:name="libcdsprpc.so" android:required="false"/><uses-native-library android:name="libadsprpc.so" android:required="false"/><activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
   </activity>
  </application>

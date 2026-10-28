@@ -1,122 +1,303 @@
 package cc.wckd.walkietalkie;
 
 import android.Manifest;
-import android.app.*;
+import android.animation.ValueAnimator;
 import android.content.*;
 import android.content.pm.PackageManager;
-import android.graphics.*;
-import android.graphics.drawable.GradientDrawable;
+import android.content.res.ColorStateList;
 import android.media.*;
 import android.os.*;
-import android.text.InputFilter;
+import android.text.*;
 import android.view.*;
-import android.view.inputmethod.InputMethodManager;
+import android.view.inputmethod.*;
 import android.widget.*;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
+import com.google.android.material.bottomsheet.*;
+import com.google.android.material.button.*;
+import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.color.*;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.loadingindicator.LoadingIndicator;
+import com.google.android.material.materialswitch.MaterialSwitch;
+import com.google.android.material.progressindicator.LinearProgressIndicator;
+import com.google.android.material.radiobutton.MaterialRadioButton;
+import com.google.android.material.shape.MaterialShapeDrawable;
+import com.google.android.material.textfield.*;
+import com.google.android.material.textview.MaterialTextView;
+import java.io.*;
+import java.text.DateFormat;
+import java.util.*;
+import java.util.concurrent.*;
 
-public class MainActivity extends Activity implements VoiceEngine.Listener {
- private static final int BG=0xff101312, CARD=0xff1b211e, GREEN=0xffcdf6ae, TEXT=0xfff0f3ed, MUTED=0xff9aa69e;
- private LinearLayout base,conversation,setup;
- private ScrollView scroll;
- private TextView status,detail,live,measurement,downloadLabel,backendLabel;
- private Button mic,install,send;
- private ProgressBar progress;
- private EditText input;
- private VoiceEngine engine;
- private TextView assistantBubble;
- private String state="starting";
- private int mode=1;
- private boolean visible=true, hasFocus=false;
- private AudioManager audioManager;
- private AudioFocusRequest focus;
+public class MainActivity extends AppCompatActivity implements VoiceEngine.Listener {
  private final Handler main=new Handler(Looper.getMainLooper());
- private long lastUi=0;
+ private final ExecutorService disk=Executors.newSingleThreadExecutor();
+ private VoiceEngine engine;
+ private SessionStore store;
+ private SessionStore.Session session;
+ private SessionStore.Entry assistantEntry;
+ private String state="starting",diagnostics="Timings appear after a reply.",actualBackend="";
+ private int mode=1;
+ private boolean visible=true,hasFocus=false,switchingMode=false,followFeed=true;
+ private TextView status,detail,live,backendLabel,timer,title,downloadLabel,setupTitle,setupBody,assistantBubble;
+ private MaterialButton mic,send,install,play;
+ private TextInputEditText input;
+ private LinearLayout conversation,composer,recordingActions;
+ private View intro,setup,suggestions;
+ private ScrollView scroll;
+ private LinearProgressIndicator progress;
+ private LoadingIndicator thinking;
+ private MaterialButtonToggleGroup modeButtons;
+ private MediaPlayer player;
+ private AudioManager audioManager;
+ private AudioFocusRequest audioFocus;
+ private SessionStore.Session exportSession;
  private String pendingReply="";
- private final Runnable renderReply=()->{if(assistantBubble!=null){assistantBubble.setText(pendingReply.isEmpty()?"…":pendingReply);scroll.post(()->scroll.fullScroll(View.FOCUS_DOWN));}};
- private final String[] modes={"CPU · compatibility","Adreno GPU · OpenCL","Hexagon NPU · experimental","GPU + NPU · experimental 50/50 split"};
- @Override public void onCreate(Bundle b){
-  super.onCreate(b);
-  mode=getPreferences(0).getBoolean("load_in_progress",false)?0:getPreferences(0).getInt("backend",1);
+ private final String[] modes={"CPU · Compatibility","Adreno GPU · Recommended","Hexagon NPU · Experimental","GPU + NPU · Experimental"};
+ private final Runnable saveLater=this::saveNow;
+ private final Runnable renderReply=()->{if(assistantBubble!=null){assistantBubble.setText(pendingReply.isEmpty()?"…":pendingReply);scrollIfFollowing();}};
+
+ @Override public void onCreate(Bundle saved){
+  DynamicColors.applyToActivityIfAvailable(this);
+  super.onCreate(saved);
+  WindowCompat.setDecorFitsSystemWindows(getWindow(),false);
+  mode=Math.max(0,Math.min(3,getPreferences(0).getBoolean("load_in_progress",false)?0:getPreferences(0).getInt("backend",1)));
+  store=new SessionStore(this);
+  String previous=getPreferences(0).getString("session","");
+  try{session=previous.isEmpty()?new SessionStore.Session():store.read(previous);}catch(Exception ignored){session=new SessionStore.Session();}
   audioManager=(AudioManager)getSystemService(AUDIO_SERVICE);
-  focus=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()).setOnAudioFocusChangeListener(change->{if(change<0){engine.cancel();state("ready","Audio paused by another app.");}}).build();
-  buildUi();
+  audioFocus=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+   .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+   .setOnAudioFocusChangeListener(change->{if(change<0){hasFocus=false;stopPlayback();if(state.equals("recording")){engine.finishListening();state("finishing","Saving your recording…");}else if(active()){engine.cancel();state("ready","Audio paused by another app.");}}}).build();
+  bindViews();
   engine=new VoiceEngine(this,this);
   engine.fillers=getPreferences(0).getBoolean("fillers",true);
+  engine.restoreHistory(session.entries);
+  renderSession();
   engine.prepare(false,mode);
  }
  private int dp(float n){return Math.round(n*getResources().getDisplayMetrics().density);}
- private GradientDrawable bg(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
- private TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setFontFeatureSettings("kern");return t;}
- private LinearLayout col(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);return l;}
- private void gap(LinearLayout l,int n){View v=new View(this);l.addView(v,new LinearLayout.LayoutParams(1,dp(n)));}
- private Button button(String s){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTextSize(15);b.setTextColor(TEXT);b.setBackground(bg(CARD,18));b.setMinHeight(dp(48));return b;}
- private void buildUi(){
-  base=col();base.setBackgroundColor(BG);base.setPadding(dp(22),dp(14),dp(22),dp(12));setContentView(base);
-  base.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.ime());base.setPadding(dp(22)+i.left,dp(12)+i.top,dp(22)+i.right,dp(12)+i.bottom);return insets;});
-  LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
-  TextView brand=text("walkietalkie",27,TEXT);brand.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));header.addView(brand,new LinearLayout.LayoutParams(0,dp(48),1));
-  Button settings=button("Engine");settings.setContentDescription("Choose inference engine and voice style");settings.setOnClickListener(v->settings());header.addView(settings,new LinearLayout.LayoutParams(dp(90),dp(44)));base.addView(header);
-  gap(base,12);status=text("●  GETTING READY",11,GREEN);status.setLetterSpacing(0.14f);base.addView(status);gap(base,5);
-  backendLabel=text(modes[mode]+"  /  Qwen 2.5 · 3B",11,MUTED);base.addView(backendLabel);gap(base,10);
-  scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setClipToPadding(false);scroll.setVerticalScrollBarEnabled(false);
-  LinearLayout body=col();scroll.addView(body);base.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
-  LinearLayout intro=col();intro.setPadding(0,dp(12),0,dp(8));TextView title=text("A little more\nhuman.",38,TEXT);title.setTypeface(Typeface.create("sans-serif-light",Typeface.NORMAL));intro.addView(title);gap(intro,10);intro.addView(text("A voice, a thought, a reply.\nAll on your phone.",15,MUTED));gap(intro,14);intro.addView(new Wave(this),new LinearLayout.LayoutParams(-1,dp(64)));body.addView(intro);
-  setup=col();setup.setPadding(dp(18),dp(18),dp(18),dp(18));setup.setBackground(bg(CARD,22));
-  setup.addView(text("Make yourself at home",19,TEXT));gap(setup,10);
-  setup.addView(text("01   Listen       Moonshine Tiny Streaming\n02   Think        Qwen 2.5 · 3B · Q4_0\n03   Speak       Kokoro · Heart",13,GREEN));gap(setup,12);
-  setup.addView(text("One-time download: about 2.5–3 GB. Have 4 GB free and use Wi-Fi. Then airplane mode is welcome. English speech in this demo.",13,MUTED));gap(setup,12);
-  downloadLabel=text("Models stay in private app storage.",12,MUTED);setup.addView(downloadLabel);
-  progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setProgressTintList(android.content.res.ColorStateList.valueOf(GREEN));progress.setVisibility(View.GONE);setup.addView(progress);gap(setup,12);
-  install=button("Download & set up");install.setTextColor(BG);install.setBackground(bg(GREEN,16));install.setOnClickListener(v->{install.setEnabled(false);engine.prepare(true,mode);});setup.addView(install,new LinearLayout.LayoutParams(-1,dp(50)));body.addView(setup);gap(body,16);
-  conversation=col();body.addView(conversation);
-  measurement=text("Measured timings appear after a reply.",10,MUTED);body.addView(measurement);gap(body,8);
-  live=text("",15,GREEN);live.setMaxLines(3);base.addView(live);gap(base,4);
-  detail=text("Preparing your private voice space…",12,MUTED);base.addView(detail);gap(base,10);
-  mic=button("One moment…");mic.setTextColor(BG);mic.setBackground(bg(GREEN,25));mic.setEnabled(false);mic.setOnClickListener(v->micAction());base.addView(mic,new LinearLayout.LayoutParams(-1,dp(56)));gap(base,10);
-  LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);input=new EditText(this);input.setSingleLine(true);input.setTextColor(TEXT);input.setHintTextColor(MUTED);input.setHint("Or type a thought…");input.setTextSize(14);input.setPadding(dp(14),0,dp(12),0);input.setBackground(bg(CARD,18));input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(1200)});input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND);row.addView(input,new LinearLayout.LayoutParams(0,dp(48),1));send=button("Send");send.setOnClickListener(v->sendText());LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(72),dp(48));sp.leftMargin=dp(8);row.addView(send,sp);input.setOnEditorActionListener((v,id,event)->{if(id==android.view.inputmethod.EditorInfo.IME_ACTION_SEND){sendText();return true;}return false;});base.addView(row);
+ private int color(int attr){return MaterialColors.getColor(this,attr,MainActivity.class.getSimpleName());}
+ private TextView text(String words,int appearance){MaterialTextView t=new MaterialTextView(this);t.setText(words);t.setTextAppearance(appearance);return t;}
+ private LinearLayout column(){LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);return box;}
+ private void space(LinearLayout box,int amount){box.addView(new View(this),new LinearLayout.LayoutParams(1,dp(amount)));}
+ private MaterialButton button(String words,int style){int layout=style==R.style.Widget_WalkieTalkie_Action?R.layout.button_action:style==com.google.android.material.R.style.Widget_Material3Expressive_Button_TonalButton?R.layout.button_tonal:R.layout.button_text;MaterialButton b=(MaterialButton)getLayoutInflater().inflate(layout,null);b.setText(words);return b;}
+ private void surface(View view,int fill,int radius){MaterialShapeDrawable shape=new MaterialShapeDrawable();shape.setFillColor(ColorStateList.valueOf(color(fill)));shape.setCornerSize(dp(radius));view.setBackground(shape);}
+ private boolean active(){return state.equals("recording")||state.equals("listening")||state.equals("thinking")||state.equals("speaking")||state.equals("finishing");}
+ private boolean editable(){return state.equals("ready")||state.equals("missing")||state.equals("error");}
+ private boolean recordingMode(){return session.kind.equals("recording");}
+ private void bindViews(){
+  setContentView(R.layout.activity_main);
+  View root=findViewById(R.id.window_root),content=findViewById(R.id.content);
+  root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.ime());v.setPadding(i.left,i.top,i.right,i.bottom);return insets;});
+  root.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{int width=Math.min(r-l-root.getPaddingLeft()-root.getPaddingRight(),dp(760));if(width>0&&content.getLayoutParams().width!=width){content.getLayoutParams().width=width;content.requestLayout();}});
+  status=findViewById(R.id.status);detail=findViewById(R.id.detail);live=findViewById(R.id.live);backendLabel=findViewById(R.id.backend);
+  timer=findViewById(R.id.timer);title=findViewById(R.id.session_title);downloadLabel=findViewById(R.id.download_label);
+  setupTitle=findViewById(R.id.setup_title);setupBody=findViewById(R.id.setup_body);scroll=findViewById(R.id.scroll);
+  mic=findViewById(R.id.mic);send=findViewById(R.id.send);install=findViewById(R.id.install);play=findViewById(R.id.play);input=findViewById(R.id.input);
+  conversation=findViewById(R.id.conversation);composer=findViewById(R.id.composer);recordingActions=findViewById(R.id.recording_actions);
+  intro=findViewById(R.id.intro);setup=findViewById(R.id.setup);suggestions=findViewById(R.id.suggestions);
+  progress=findViewById(R.id.progress);thinking=findViewById(R.id.thinking);modeButtons=findViewById(R.id.modes);
+  surface(status,com.google.android.material.R.attr.colorSecondaryContainer,24);
+  status.setTextColor(color(com.google.android.material.R.attr.colorOnSecondaryContainer));
+  LinearLayout steps=findViewById(R.id.model_steps);
+  String[] labels={"Listen","Think","Speak"};
+  for(int i=0;i<3;i++){LinearLayout step=column();TextView n=text("0"+(i+1),com.google.android.material.R.style.TextAppearance_Material3_TitleLarge_Emphasized);n.setTextColor(color(com.google.android.material.R.attr.colorPrimary));step.addView(n);space(step,4);step.addView(text(labels[i],com.google.android.material.R.style.TextAppearance_Material3_LabelLarge));steps.addView(step,new LinearLayout.LayoutParams(0,-2,1));}
+  findViewById(R.id.settings).setOnClickListener(v->{if(editable())settings();else toast("Pause or finish the current turn first.");});
+  findViewById(R.id.library).setOnClickListener(v->{if(editable())library();else toast("Pause or finish before opening your library.");});
+  findViewById(R.id.new_chat).setOnClickListener(v->{if(editable())newSession(recordingMode()?"recording":"chat");else toast("Pause or finish the current turn first.");});
+  modeButtons.addOnButtonCheckedListener((group,id,checked)->{if(!checked||switchingMode)return;String next=id==R.id.mode_record?"recording":"chat";if(!next.equals(session.kind)){if(editable())newSession(next);else updateMode();}});
+  mic.setOnClickListener(v->{v.performHapticFeedback(HapticFeedbackConstants.CONFIRM);micAction();});
+  install.setOnClickListener(v->{install.setEnabled(false);state("setup","Downloading voice models…");engine.prepare(true,mode);});
+  send.setOnClickListener(v->sendText());
+  input.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){send.setEnabled(state.equals("ready")&&!s.toString().trim().isEmpty());}public void afterTextChanged(Editable e){}});
+  input.setOnEditorActionListener((v,id,event)->{if(id==EditorInfo.IME_ACTION_SEND){sendText();return true;}return false;});
+  findViewById(R.id.suggest_unwind).setOnClickListener(v->{input.setText("Help me unwind and sort through my thoughts.");input.requestFocus();});
+  findViewById(R.id.suggest_brainstorm).setOnClickListener(v->{input.setText("Help me brainstorm an idea. Ask me a question to get started.");input.requestFocus();});
+  findViewById(R.id.summarize).setOnClickListener(v->reflect("Summarize this recording. Include the main points, decisions and next steps."));
+  findViewById(R.id.reflect).setOnClickListener(v->reflect("Reflect on this recording with me. Offer a useful perspective and one thoughtful follow-up question."));
+  findViewById(R.id.export).setOnClickListener(v->export(session));
+  play.setOnClickListener(v->playPause());
+  scroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->{if(y<oldY)followFeed=false;if(atBottom())followFeed=true;});
+  updateMode();
  }
- private boolean focus(){if(hasFocus)return true;hasFocus=audioManager.requestAudioFocus(focus)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;if(!hasFocus)detail.setText("Audio is busy in another app. Try again.");return hasFocus;}
- private void releaseFocus(){if(hasFocus){audioManager.abandonAudioFocusRequest(focus);hasFocus=false;}}
+ private boolean atBottom(){return scroll.getChildCount()==0||scroll.getChildAt(0).getBottom()-scroll.getHeight()-scroll.getScrollY()<dp(80);}
+ private void scrollIfFollowing(){if(followFeed)scroll.post(()->scroll.fullScroll(View.FOCUS_DOWN));}
+ private void updateMode(){switchingMode=true;modeButtons.check(recordingMode()?R.id.mode_record:R.id.mode_chat);switchingMode=false;}
+ private void newSession(String kind){stopPlayback();saveNow();engine.clear();session=new SessionStore.Session();session.kind=kind;getPreferences(0).edit().remove("session").apply();assistantEntry=null;assistantBubble=null;input.setText("");renderSession();state(engine.ready()?"ready":"missing","A fresh space for your thoughts.");}
+ private void renderSession(){
+  conversation.removeAllViews();assistantBubble=null;assistantEntry=null;followFeed=true;
+  int start=Math.max(0,session.entries.size()-120);
+  if(start>0){MaterialButton older=button("Show all "+session.entries.size()+" transcript entries",com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);conversation.addView(older);older.setOnClickListener(v->{conversation.removeView(older);for(int i=start-1;i>=0;i--){View row=entryCard(session.entries.get(i));conversation.addView(row,0);}});}
+  for(int i=start;i<session.entries.size();i++)conversation.addView(entryCard(session.entries.get(i)));
+  updateSessionViews();updateMode();scrollIfFollowing();
+ }
+ private void updateSessionViews(){
+  boolean has=!session.entries.isEmpty()||session.durationMs>0;
+  intro.setVisibility(has?View.GONE:View.VISIBLE);
+  title.setText(session.displayTitle());title.setVisibility(has?View.VISIBLE:View.GONE);
+  timer.setText(SessionStore.stamp(session.durationMs));timer.setContentDescription("Recording duration "+SessionStore.stamp(session.durationMs));timer.setVisibility(recordingMode()||session.durationMs>0?View.VISIBLE:View.GONE);
+  suggestions.setVisibility(!recordingMode()&&!has&&state.equals("ready")?View.VISIBLE:View.GONE);
+  recordingActions.setVisibility(has&&!active()?View.VISIBLE:View.GONE);
+  play.setVisibility(store.audio(session).length()>44?View.VISIBLE:View.GONE);
+  findViewById(R.id.summarize).setEnabled(!session.transcript().isEmpty()&&state.equals("ready"));
+  findViewById(R.id.reflect).setEnabled(!session.transcript().isEmpty()&&state.equals("ready"));
+ }
+ private View entryCard(SessionStore.Entry e){
+  MaterialCardView card=new MaterialCardView(this);card.setRadius(dp(24));card.setStrokeWidth(0);card.setCardElevation(0);
+  boolean assistant=e.role.equals("assistant");
+  card.setCardBackgroundColor(color(assistant?com.google.android.material.R.attr.colorPrimaryContainer:com.google.android.material.R.attr.colorSurfaceContainer));
+  LinearLayout box=column();box.setPadding(dp(18),dp(16),dp(18),dp(18));card.addView(box);
+  String label=e.role.equals("transcript")?"RECORDED  ·  "+SessionStore.stamp(e.startMs):assistant?"WALKIETALKIE":"YOU";
+  TextView who=text(label,com.google.android.material.R.style.TextAppearance_Material3_LabelMedium);who.setTextColor(color(assistant?com.google.android.material.R.attr.colorOnPrimaryContainer:com.google.android.material.R.attr.colorOnSurfaceVariant));box.addView(who);space(box,8);
+  TextView words=text(e.text.isEmpty()?"…":e.text,com.google.android.material.R.style.TextAppearance_Material3_BodyLarge);words.setTextColor(color(assistant?com.google.android.material.R.attr.colorOnPrimaryContainer:com.google.android.material.R.attr.colorOnSurface));words.setTextIsSelectable(true);words.setLineSpacing(dp(3),1);box.addView(words);card.setTag(words);
+  LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(10);card.setLayoutParams(lp);
+  if(e.role.equals("transcript")){who.setContentDescription("Play audio from "+SessionStore.stamp(e.startMs));who.setMinHeight(dp(48));who.setOnClickListener(v->{if(!active())playFrom(e.startMs);});}
+  return card;
+ }
+ private void append(SessionStore.Entry e){
+  session.entries.add(e);if(session.title.isBlank()&&!e.text.isBlank())session.title=e.text.replaceAll("\s+"," ").substring(0,Math.min(60,e.text.replaceAll("\s+"," ").length()));
+  session.updated=System.currentTimeMillis();View card=entryCard(e);conversation.addView(card);if(e.role.equals("assistant")){assistantEntry=e;assistantBubble=(TextView)card.getTag();}
+  if(ValueAnimator.areAnimatorsEnabled()){card.setAlpha(0);card.animate().alpha(1).setDuration(180).start();}
+  updateSessionViews();scrollIfFollowing();scheduleSave();
+ }
+ private void scheduleSave(){main.removeCallbacks(saveLater);main.postDelayed(saveLater,500);}
+ private void saveNow(){
+  main.removeCallbacks(saveLater);if(session==null||(session.entries.isEmpty()&&session.durationMs==0&&!store.audio(session).exists()))return;
+  SessionStore.Session copy=session.snapshot();getPreferences(0).edit().putString("session",copy.id).apply();
+  if(!disk.isShutdown())disk.execute(()->{try{store.save(copy);}catch(IOException error){main.post(()->{toast("Could not save: "+error.getMessage());if(state.equals("recording"))engine.finishListening();});}});
+ }
+ private boolean focus(){if(hasFocus)return true;hasFocus=audioManager.requestAudioFocus(audioFocus)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;if(!hasFocus)detail.setText("Audio is busy in another app. Try again.");return hasFocus;}
+ private void releaseFocus(){if(hasFocus){audioManager.abandonAudioFocusRequest(audioFocus);hasFocus=false;}}
  private void micAction(){
-  if(state.equals("listening")){engine.finishListening();detail.setText("Finishing your thought…");return;}
-  if(state.equals("thinking")||state.equals("speaking")){engine.cancel();state("ready","Interrupted. Tap to speak when you’re ready.");return;}
-  if(!engine.ready())return;
+  if(state.equals("recording")||state.equals("listening")){engine.finishListening();state("finishing","Saving this part of your recording…");return;}
+  if(state.equals("thinking")||state.equals("speaking")){engine.cancel();saveNow();state("ready","Paused. Your recording and replies are saved.");return;}
+  if(!state.equals("ready")||!engine.ready())return;
+  stopPlayback();
   if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},8);return;}
-  if(focus()){state("listening","Opening microphone…");engine.listen();}
+  if(focus()){
+   try{store.save(session);}catch(IOException error){error("Could not create recording: "+error.getMessage());return;}
+   getPreferences(0).edit().putString("session",session.id).apply();
+   state(recordingMode()?"recording":"listening","Opening microphone…");
+   if(recordingMode())engine.record(store.audio(session));else engine.listen(store.audio(session));
+  }
  }
- private void sendText(){String value=input.getText().toString().trim();if(value.isEmpty()||!state.equals("ready")||!engine.ready()||!focus())return;input.setText("");((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(input.getWindowToken(),0);state("thinking","Finding the words…");engine.send(value);}
- @Override public void onRequestPermissionsResult(int request,String[] p,int[] result){super.onRequestPermissionsResult(request,p,result);if(request==8&&result.length>0&&result[0]==PackageManager.PERMISSION_GRANTED&&visible)micAction();else detail.setText("Microphone permission is needed to talk. You can still type.");}
+ private void sendText(){
+  String value=input.getText()==null?"":input.getText().toString().trim();
+  if(value.isEmpty()||!state.equals("ready")||!engine.ready())return;
+  stopPlayback();if(!focus())return;input.setText("");hideKeyboard();state("thinking","Finding the words…");engine.send(value);
+ }
+ private void reflect(String instruction){if(!state.equals("ready")||!engine.ready()||session.transcript().isEmpty())return;stopPlayback();if(focus()){state("thinking","Reading your transcript…");engine.reflect(session.transcript(),instruction);}}
+ private void hideKeyboard(){((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(input.getWindowToken(),0);input.clearFocus();}
+ @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] result){super.onRequestPermissionsResult(request,permissions,result);if(request==8&&result.length>0&&result[0]==PackageManager.PERMISSION_GRANTED&&visible)micAction();else detail.setText("Allow microphone access to record. Typing still works.");}
+
+ private BottomSheetDialog sheet(String heading,LinearLayout panel){
+  BottomSheetDialog dialog=new BottomSheetDialog(this);ScrollView scrolling=new ScrollView(this);scrolling.setFillViewport(false);panel.setPadding(dp(24),dp(12),dp(24),dp(32));
+  TextView label=text(heading,com.google.android.material.R.style.TextAppearance_Material3_HeadlineSmall_Emphasized);label.setAccessibilityHeading(true);label.setPadding(0,dp(8),0,dp(20));panel.addView(label,0);
+  scrolling.addView(panel);dialog.setContentView(scrolling);dialog.setOnShowListener(d->{View frame=dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);if(frame!=null){frame.getLayoutParams().height=(int)(getResources().getDisplayMetrics().heightPixels*.88);frame.requestLayout();BottomSheetBehavior.from(frame).setState(BottomSheetBehavior.STATE_EXPANDED);}});dialog.show();return dialog;
+ }
  private void settings(){
-  if(!state.equals("ready")&&!state.equals("missing")&&!state.equals("error")){Toast.makeText(this,"Finish the current turn first.",Toast.LENGTH_SHORT).show();return;}
-  LinearLayout panel=col();panel.setPadding(dp(22),dp(12),dp(22),0);
-  panel.addView(text("Qwen acceleration",16,TEXT));Spinner spinner=new Spinner(this);spinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,modes));spinner.setSelection(mode);panel.addView(spinner);
-  panel.addView(text("GPU is the default. NPU and mixed mode are experimental and need the phone’s FastRPC access. Speech models use CPU. Mixed mode is not always faster.",13,MUTED));gap(panel,14);
-  Switch filler=new Switch(this);filler.setText("Natural conversational fillers");filler.setTextColor(TEXT);filler.setChecked(engine.fillers);panel.addView(filler);gap(panel,12);
-  panel.addView(text("No server. No account. Chat history lives in memory and clears when the app closes. Latency varies with heat and model load.",12,MUTED));
-  new AlertDialog.Builder(this).setTitle("Make it yours").setView(panel).setNegativeButton("Close",null).setNeutralButton("New chat",(d,w)->{engine.clear();conversation.removeAllViews();assistantBubble=null;state(engine.ready()?"ready":"missing",engine.ready()?"A fresh conversation.":"Download the models once to use WalkieTalkie offline.");}).setPositiveButton("Apply",(d,w)->{int next=spinner.getSelectedItemPosition();engine.fillers=filler.isChecked();getPreferences(0).edit().putInt("backend",next).putBoolean("fillers",engine.fillers).apply();boolean changed=mode!=next;mode=next;backendLabel.setText(modes[mode]+"  /  Qwen 2.5 · 3B");if(changed||!engine.ready())engine.prepare(false,mode);}).show();
+  hideKeyboard();LinearLayout panel=column();RadioGroup choices=new RadioGroup(this);
+  for(int i=0;i<modes.length;i++){MaterialRadioButton option=new MaterialRadioButton(this);option.setId(100+i);option.setText(modes[i]);option.setMinHeight(dp(56));choices.addView(option);}
+  choices.check(100+mode);panel.addView(text("Acceleration",com.google.android.material.R.style.TextAppearance_Material3_TitleMedium_Emphasized));panel.addView(choices);space(panel,12);
+  panel.addView(text("NPU modes need OnePlus FastRPC support. Mixed mode can be slower. Speech uses CPU.",com.google.android.material.R.style.TextAppearance_Material3_BodySmall));space(panel,16);
+  MaterialSwitch fillers=new MaterialSwitch(this);fillers.setText("Conversational fillers");fillers.setMinHeight(dp(56));fillers.setChecked(engine.fillers);panel.addView(fillers);
+  panel.addView(text("Short, varied fillers make spoken replies feel more natural.",com.google.android.material.R.style.TextAppearance_Material3_BodyMedium));space(panel,16);
+  MaterialButton models=button("Hugging Face models",com.google.android.material.R.style.Widget_Material3Expressive_Button_TonalButton);models.setId(R.id.models);panel.addView(models);
+  TextView diagnostic=text(actualBackend+"\n"+engine.store.model.label()+"\n\n"+diagnostics+"\n\nAudio and transcripts stay on this phone. Recording pauses when you leave the app. Speaker separation is not inferred.",com.google.android.material.R.style.TextAppearance_Material3_BodySmall);diagnostic.setTextIsSelectable(true);diagnostic.setVisibility(View.GONE);
+  MaterialButton stats=button("Device & privacy details",com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);stats.setOnClickListener(v->diagnostic.setVisibility(diagnostic.getVisibility()==View.GONE?View.VISIBLE:View.GONE));panel.addView(stats);panel.addView(diagnostic);space(panel,16);
+  MaterialButton apply=button("Apply settings",R.style.Widget_WalkieTalkie_Action);panel.addView(apply);
+  BottomSheetDialog dialog=sheet("Make it yours",panel);
+  models.setOnClickListener(v->{dialog.dismiss();models();});
+  apply.setOnClickListener(v->{int next=choices.getCheckedRadioButtonId()-100;engine.fillers=fillers.isChecked();getPreferences(0).edit().putInt("backend",next).putBoolean("fillers",engine.fillers).apply();boolean changed=mode!=next;mode=next;dialog.dismiss();if(changed||!engine.ready()){state("loading","Opening your selected engine…");engine.prepare(false,mode);}else updateBackend();});
  }
- @Override public void state(String value,String message){main.post(()->{
-  if(isDestroyed())return;if(value.equals("loading"))getPreferences(0).edit().putBoolean("load_in_progress",true).commit();if(value.equals("ready")||value.equals("error"))getPreferences(0).edit().putBoolean("load_in_progress",false).apply();state=value;detail.setText(message);status.setText("●  "+switch(value){case "ready"->"OFFLINE & READY";case "listening"->"LISTENING";case "thinking"->"THINKING";case "speaking"->"SPEAKING";case "setup"->"DOWNLOADING MODELS";case "error"->"NEEDS ATTENTION";default->"GETTING READY";});
-  boolean active=value.equals("listening")||value.equals("thinking")||value.equals("speaking");
-  boolean busy=value.equals("setup")||value.equals("loading");
-  mic.setEnabled(active||value.equals("ready"));mic.setText(value.equals("listening")?"Finish turn":active?"Interrupt":"Tap to speak");send.setEnabled(value.equals("ready"));input.setEnabled(value.equals("ready"));
-  if(busy)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-  setup.setVisibility(value.equals("missing")||value.equals("setup")?View.VISIBLE:View.GONE);progress.setVisibility(value.equals("setup")?View.VISIBLE:View.GONE);install.setEnabled(value.equals("missing"));
-  if(!active){live.setText("");releaseFocus();}
+ private void models(){
+  LinearLayout panel=column();panel.addView(text("Download compatible Qwen models directly from Hugging Face. Downloads resume and are verified with SHA-256. Speech models are shared across choices.",com.google.android.material.R.style.TextAppearance_Material3_BodyMedium));space(panel,16);
+  BottomSheetDialog dialog=sheet("Models on your phone",panel);
+  for(int i=0;i<ModelCatalog.MODELS.length;i++){
+   int index=i;ModelCatalog.Model model=ModelCatalog.MODELS[i];LinearLayout card=column();card.setPadding(dp(16),dp(16),dp(16),dp(16));surface(card,com.google.android.material.R.attr.colorSurfaceContainer,24);
+   card.addView(text(model.label(),com.google.android.material.R.style.TextAppearance_Material3_TitleMedium_Emphasized));space(card,6);
+   card.addView(text(model.description()+"\n"+model.license()+" · Q4_0",com.google.android.material.R.style.TextAppearance_Material3_BodyMedium));
+   boolean installed=engine.store.downloaded(i);MaterialButton action=button(i==engine.store.selected&&installed?"Selected":installed?"Use downloaded model":"Download from Hugging Face",com.google.android.material.R.style.Widget_Material3Expressive_Button_TonalButton);action.setEnabled(!(i==engine.store.selected&&installed));card.addView(action);
+   action.setOnClickListener(v->{dialog.dismiss();state("setup","Preparing "+model.label()+"…");engine.selectModel(index,mode);});
+   MaterialButton source=button("Model card ↗",com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);source.setOnClickListener(v->startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://huggingface.co/"+model.repo()))));card.addView(source);panel.addView(card);space(panel,12);
+  }
+ }
+ private void library(){
+  stopPlayback();hideKeyboard();LinearLayout panel=column();
+  TextInputLayout searchBox=new TextInputLayout(this);searchBox.setHint("Search titles and transcripts");TextInputEditText search=new TextInputEditText(searchBox.getContext());search.setSingleLine(true);searchBox.addView(search);panel.addView(searchBox);space(panel,12);
+  Spinner filter=new Spinner(this);filter.setMinimumHeight(dp(48));filter.setContentDescription("Filter recordings or chats");filter.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"All recordings & chats","Recordings","Conversations"}));panel.addView(filter);
+  Spinner sort=new Spinner(this);sort.setMinimumHeight(dp(48));sort.setContentDescription("Sort library");sort.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Recently updated","Oldest first","Title A–Z","Longest recording"}));sort.setSelection(getPreferences(0).getInt("sort",0));panel.addView(sort);space(panel,12);
+  LinearLayout results=column();panel.addView(results);TextView loading=text("Opening your library…",com.google.android.material.R.style.TextAppearance_Material3_BodyLarge);results.addView(loading);
+  BottomSheetDialog dialog=sheet("Your recordings & chats",panel);saveNow();
+  List<SessionStore.Session> cached=new ArrayList<>();
+  Runnable render=()->{results.removeAllViews();String kind=switch(filter.getSelectedItemPosition()){case 1->"recording";case 2->"chat";default->"all";};List<SessionStore.Session> items=SessionStore.sorted(cached,search.getText()==null?"":search.getText().toString(),kind,sort.getSelectedItemPosition());if(items.isEmpty())results.addView(text("No recordings here yet. Your next thought can be the first.",com.google.android.material.R.style.TextAppearance_Material3_BodyLarge));
+   for(SessionStore.Session item:items){
+    LinearLayout row=column();row.setPadding(dp(16),dp(16),dp(16),dp(16));surface(row,com.google.android.material.R.attr.colorSurfaceContainer,24);
+    MaterialButton open=button((item.pinned?"★  ":"")+item.displayTitle(),com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);open.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);open.setMaxLines(3);row.addView(open);
+    row.addView(text((item.kind.equals("recording")?"Recording":"Conversation")+" · "+SessionStore.stamp(item.durationMs)+"\n"+DateFormat.getDateTimeInstance(DateFormat.MEDIUM,DateFormat.SHORT).format(new Date(item.updated)),com.google.android.material.R.style.TextAppearance_Material3_BodySmall));
+    MaterialButton more=button("Rename · Pin · Export · Delete",com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);row.addView(more);panel.setFocusableInTouchMode(true);
+    open.setOnClickListener(v->{dialog.dismiss();session=item;engine.restoreHistory(item.entries);getPreferences(0).edit().putString("session",item.id).apply();renderSession();state(engine.ready()?"ready":"missing","Saved on this phone.");});
+    more.setOnClickListener(v->{dialog.dismiss();sessionMenu(item);});results.addView(row);space(results,10);
+   }
+  };
+  AdapterView.OnItemSelectedListener change=new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> a,View v,int p,long id){getPreferences(0).edit().putInt("sort",sort.getSelectedItemPosition()).apply();render.run();}public void onNothingSelected(AdapterView<?> a){}};
+  filter.setOnItemSelectedListener(change);sort.setOnItemSelectedListener(change);
+  search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){render.run();}public void afterTextChanged(Editable e){}});
+  disk.execute(()->{try{List<SessionStore.Session> items=store.list();main.post(()->{cached.addAll(items);render.run();});}catch(IOException error){main.post(()->loading.setText("Could not open library: "+error.getMessage()));}});
+ }
+ private void sessionMenu(SessionStore.Session item){
+  new MaterialAlertDialogBuilder(this).setTitle(item.displayTitle()).setItems(new String[]{"Rename",item.pinned?"Unpin":"Pin to top","Export","Delete audio and transcript"},(d,which)->{
+   if(which==0){EditText name=new TextInputEditText(this);name.setText(item.displayTitle());name.setSingleLine(true);name.setPadding(dp(24),dp(12),dp(24),dp(12));new MaterialAlertDialogBuilder(this).setTitle("Name this recording").setView(name).setNegativeButton("Cancel",null).setPositiveButton("Save",(a,b)->{String value=name.getText().toString().trim();if(!value.isEmpty()){item.title=value;if(item.id.equals(session.id))session.title=value;saveItem(item);updateSessionViews();}}).show();}
+   else if(which==1){item.pinned=!item.pinned;if(item.id.equals(session.id))session.pinned=item.pinned;saveItem(item);}
+   else if(which==2)export(item);
+   else new MaterialAlertDialogBuilder(this).setTitle("Delete this recording?").setMessage("Its audio, transcript and replies will be removed from this phone.").setNegativeButton("Keep",null).setPositiveButton("Delete",(a,b)->{stopPlayback();disk.execute(()->{try{store.delete(item);main.post(()->{if(item.id.equals(session.id)){session=new SessionStore.Session();getPreferences(0).edit().remove("session").apply();engine.clear();renderSession();}toast("Deleted");});}catch(IOException error){main.post(()->toast(error.getMessage()));}});}).show();
+  }).show();
+ }
+ private void saveItem(SessionStore.Session item){SessionStore.Session copy=item.snapshot();disk.execute(()->{try{store.save(copy);main.post(()->toast("Saved"));}catch(IOException e){main.post(()->toast(e.getMessage()));}});}
+ private void export(SessionStore.Session item){exportSession=item.snapshot();new MaterialAlertDialogBuilder(this).setTitle("Export").setItems(new String[]{"Transcript (.txt)","Recording audio (.wav)"},(d,which)->{if(which==1&&!store.audio(item).exists()){toast("This conversation has no recorded audio.");return;}Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(which==0?"text/plain":"audio/wav").putExtra(Intent.EXTRA_TITLE,item.displayTitle().replaceAll("[^a-zA-Z0-9 _-]","").trim()+(which==0?".txt":".wav"));startActivityForResult(intent,which==0?51:52);}).show();}
+ @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if((request==51||request==52)&&result==RESULT_OK&&data!=null&&data.getData()!=null&&exportSession!=null){SessionStore.Session copy=exportSession;android.net.Uri uri=data.getData();disk.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot open destination");if(request==51)out.write(copy.exportText().getBytes(java.nio.charset.StandardCharsets.UTF_8));else try(InputStream in=new FileInputStream(store.audio(copy))){in.transferTo(out);}main.post(()->toast("Export saved"));}catch(IOException error){main.post(()->toast("Export failed: "+error.getMessage()));}});}}
+ private void playPause(){if(player!=null){stopPlayback();releaseFocus();}else playFrom(0);}
+ private void playFrom(long position){
+  if(active()||!store.audio(session).exists())return;stopPlayback();if(!focus())return;
+  try{player=new MediaPlayer();player.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());player.setDataSource(store.audio(session).getAbsolutePath());player.setOnPreparedListener(p->{p.seekTo(position,MediaPlayer.SEEK_CLOSEST);p.start();play.setText("Stop playback");});player.setOnCompletionListener(p->{stopPlayback();releaseFocus();});player.setOnErrorListener((p,w,e)->{stopPlayback();releaseFocus();toast("Could not play this recording.");return true;});player.prepareAsync();}catch(IOException error){stopPlayback();releaseFocus();toast(error.getMessage());}
+ }
+ private void stopPlayback(){if(player!=null){player.release();player=null;}if(play!=null)play.setText("Play recording");}
+ private void toast(String message){if(!isDestroyed())Toast.makeText(this,message,Toast.LENGTH_LONG).show();}
+ private void updateBackend(){backendLabel.setText(engine.store.model.label()+" · "+switch(mode){case 0->"CPU";case 2->"NPU";case 3->"GPU + NPU";default->"Adreno GPU";});}
+ @Override public void state(String value,String message){runOnUiThread(()->{
+  if(isDestroyed())return;String previous=state;state=value;detail.setText(message);
+  if(value.equals("loading"))getPreferences(0).edit().putBoolean("load_in_progress",true).apply();
+  if(value.equals("ready")||value.equals("error"))getPreferences(0).edit().putBoolean("load_in_progress",false).apply();
+  status.setText(switch(value){case "ready"->"Saved here. Ready when you are.";case "recording"->"● Recording · saved on this phone";case "listening"->"Listening";case "thinking"->"Finding a fresh perspective";case "speaking"->"WalkieTalkie is speaking";case "setup"->"Downloading voice models";case "missing"->"One-time setup";case "error"->"Let’s get this sorted";case "finishing"->"Saving your recording";default->"Opening your voice space";});
+  boolean ready=value.equals("ready"),busy=value.equals("setup")||value.equals("loading")||value.equals("starting");
+  mic.setEnabled(ready||value.equals("recording")||value.equals("listening")||value.equals("thinking")||value.equals("speaking"));
+  mic.setText(value.equals("recording")?"Pause recording":value.equals("listening")?"Finish turn":value.equals("thinking")||value.equals("speaking")?"Interrupt":recordingMode()?(session.durationMs>0?"Resume recording":"Start recording"):"Tap to speak");
+  mic.setIconResource(active()?R.drawable.ic_stop:R.drawable.ic_mic);
+  send.setEnabled(ready&&input.getText()!=null&&!input.getText().toString().trim().isEmpty());input.setEnabled(ready);
+  modeButtons.setEnabled(editable());for(int i=0;i<modeButtons.getChildCount();i++)modeButtons.getChildAt(i).setEnabled(editable());
+  setup.setVisibility(value.equals("missing")||value.equals("setup")||value.equals("error")||value.equals("loading")?View.VISIBLE:View.GONE);
+  progress.setVisibility(busy?View.VISIBLE:View.GONE);progress.setIndeterminate(value.equals("loading"));
+  install.setVisibility(busy?View.GONE:View.VISIBLE);install.setEnabled(value.equals("missing")||value.equals("error"));install.setText(value.equals("error")?"Retry setup / load":"Download & set up");
+  setupTitle.setText(value.equals("error")?"Something needs attention":value.equals("loading")?"Opening your voice models":"Your voice. Your phone.");
+  setupBody.setText(value.equals("error")?message:value.equals("loading")?"The first GPU load may take longer while it prepares the model.":getString(R.string.setup_body));
+  composer.setVisibility(ready||active()?View.VISIBLE:View.GONE);thinking.setVisibility(value.equals("thinking")?View.VISIBLE:View.GONE);
+  if(busy||value.equals("recording")||value.equals("listening"))getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+  if(!active()){live.setText("");live.setVisibility(View.GONE);if(player==null)releaseFocus();}
+  updateBackend();updateSessionViews();
+  if(ready&&!previous.equals("ready")){saveNow();if(assistantBubble!=null)assistantBubble.announceForAccessibility("WalkieTalkie’s reply is ready.");}
  });}
- @Override public void progress(String label,int percent){main.post(()->{downloadLabel.setText(label);progress.setProgress(percent);});}
- @Override public void partial(String text){main.post(()->{if(state.equals("listening"))live.setText(text);});}
- private TextView bubble(String name,String words,int color){LinearLayout box=col();box.setPadding(dp(16),dp(14),dp(16),dp(16));box.setBackground(bg(color,20));box.addView(text(name,10,GREEN));gap(box,7);TextView content=text(words,17,TEXT);content.setTextIsSelectable(true);content.setLineSpacing(dp(3),1);box.addView(content);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(12);conversation.addView(box,lp);while(conversation.getChildCount()>20)conversation.removeViewAt(0);return content;}
- @Override public void user(String text){main.post(()->{bubble("YOU",text,0xff252e27);assistantBubble=null;live.setText("");});}
- @Override public void reply(String text){main.post(()->{if(assistantBubble==null)assistantBubble=bubble("WALKIETALKIE",text,CARD);pendingReply=text;long now=SystemClock.uptimeMillis();main.removeCallbacks(renderReply);if(now-lastUi>50){renderReply.run();lastUi=now;}else main.postDelayed(renderReply,50);});}
- @Override public void backend(String text){main.post(()->backendLabel.setText(text+" / Qwen 2.5 · 3B"));}
- @Override public void metrics(String text){main.post(()->measurement.setText(text));}
- @Override public void error(String message){state("error",message);main.post(()->{setup.setVisibility(View.VISIBLE);downloadLabel.setText(message);install.setText("Retry setup / load");install.setEnabled(true);});}
- @Override protected void onStop(){visible=false;releaseFocus();if(state.equals("listening")||state.equals("thinking")||state.equals("speaking")){engine.cancel();state("ready","Paused. Tap to start a new turn.");}super.onStop();}
+ @Override public void progress(String label,int percent){main.post(()->{if(isDestroyed())return;downloadLabel.setText(label);progress.setProgressCompat(Math.max(0,Math.min(100,percent)),true);});}
+ @Override public void partial(String words){main.post(()->{if(state.equals("recording")||state.equals("listening")||state.equals("finishing")){live.setText(words);live.setVisibility(words.isBlank()?View.GONE:View.VISIBLE);}});}
+ @Override public void segment(String words,long start,long end){main.post(()->{append(new SessionStore.Entry("transcript",words,start,end));session.durationMs=Math.max(session.durationMs,end);});}
+ @Override public void elapsed(long duration){main.post(()->{session.durationMs=duration;timer.setText(SessionStore.stamp(duration));if(duration%5000<300)scheduleSave();});}
+ @Override public void user(String words){main.post(()->{append(new SessionStore.Entry("user",words,session.durationMs,session.durationMs));assistantBubble=null;assistantEntry=null;live.setText("");live.setVisibility(View.GONE);});}
+ @Override public void reply(String words){main.post(()->{if(assistantEntry==null)append(new SessionStore.Entry("assistant",words,session.durationMs,session.durationMs));else assistantEntry.text=words;pendingReply=words;main.removeCallbacks(renderReply);main.postDelayed(renderReply,40);});}
+ @Override public void backend(String value){main.post(()->{actualBackend=value;updateBackend();});}
+ @Override public void metrics(String value){main.post(()->diagnostics=value);}
+ @Override public void error(String message){state("error",message);main.post(()->{saveNow();downloadLabel.setText("Your saved recordings remain in the library.");});}
+ @Override protected void onStop(){visible=false;stopPlayback();if(engine!=null){if(state.equals("recording")){engine.finishListening();state("finishing","Saving before leaving the app…");}else if(active()){engine.cancel();state("ready","Paused. Your words are saved.");}}saveNow();releaseFocus();super.onStop();}
  @Override protected void onStart(){super.onStart();visible=true;}
- @Override protected void onDestroy(){main.removeCallbacksAndMessages(null);engine.close();super.onDestroy();}
- private class Wave extends View {
-  private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
-  Wave(Context c){super(c);setContentDescription("WalkieTalkie sound wave");}
-  @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);float[] heights={8,15,24,38,52,36,20,40,58,43,25,13,27,42,29,17,9};float step=dp(12),left=(getWidth()-(heights.length-1)*step)/2;paint.setStrokeWidth(dp(5));paint.setStrokeCap(Paint.Cap.ROUND);for(int i=0;i<heights.length;i++){paint.setColor(i<10?GREEN:0xff425544);float h=dp(heights[i])/2f;canvas.drawLine(left+i*step,getHeight()/2f-h,left+i*step,getHeight()/2f+h,paint);}}
- }
+ @Override protected void onDestroy(){saveNow();main.removeCallbacksAndMessages(null);if(engine!=null)engine.close();disk.shutdown();super.onDestroy();}
 }

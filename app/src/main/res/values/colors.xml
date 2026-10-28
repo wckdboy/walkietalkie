@@ -1,0 +1,14 @@
+<resources>
+ <color name="brand_primary">#426834</color>
+ <color name="brand_on_primary">#FFFFFF</color>
+ <color name="brand_primary_container">#C3EFB0</color>
+ <color name="brand_on_primary_container">#123609</color>
+ <color name="brand_secondary_container">#DDE7D6</color>
+ <color name="brand_on_secondary_container">#3E4A38</color>
+ <color name="brand_surface">#F6FAF0</color>
+ <color name="brand_on_surface">#181D16</color>
+ <color name="brand_on_surface_variant">#42493D</color>
+ <color name="brand_container">#EAEFE4</color>
+ <color name="brand_container_high">#E4E9DE</color>
+ <bool name="light_system_bars">true</bool>
+</resources>

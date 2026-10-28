@@ -1,0 +1,25 @@
+<resources>
+ <string name="app_name">WalkieTalkie</string>
+ <string name="new_chat">New recording or chat</string>
+ <string name="engine_settings">Engine and voice settings</string>
+ <string name="hero_title">Room for every thought.</string>
+ <string name="hero_subtitle">A little more human.
+A conversation that stays with you.</string>
+ <string name="setup_title">Your voice. Your phone.</string>
+ <string name="setup_body">Download your voice models once. Then talk, even in airplane mode.</string>
+ <string name="setup_storage">About 2.5–3 GB · Keep 4 GB free
+Use Wi-Fi and keep the app open during setup.</string>
+ <string name="setup_private">Stored privately on this device.</string>
+ <string name="download">Download &amp; set up</string>
+ <string name="model_progress">Voice model download</string>
+ <string name="talk">Tap to speak</string>
+ <string name="type_hint">Type a thought</string>
+ <string name="send">Send message</string>
+ <string name="suggestion_one">Help me unwind</string>
+ <string name="suggestion_two">Brainstorm with me</string>
+ <string name="initial_detail">Getting your voice space ready…</string>
+ <string name="offline_label">On-device conversation</string>
+ <string name="setup_listen">Listen</string>
+ <string name="setup_think">Think</string>
+ <string name="setup_speak">Speak</string>
+</resources>

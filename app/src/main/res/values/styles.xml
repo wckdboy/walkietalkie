@@ -1,1 +1,36 @@
-<resources><style name="AppTheme" parent="android:style/Theme.Material.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">false</item><item name="android:windowLightNavigationBar">false</item><item name="android:colorAccent">#CDF6AE</item><item name="android:windowActionModeOverlay">true</item><item name="android:windowBackground">#101312</item><item name="android:navigationBarColor">#101312</item><item name="android:statusBarColor">#101312</item></style></resources>
+<resources>
+ <style name="AppTheme" parent="Theme.Material3Expressive.DayNight.NoActionBar">
+  <item name="colorPrimary">@color/brand_primary</item>
+  <item name="colorOnPrimary">@color/brand_on_primary</item>
+  <item name="colorPrimaryContainer">@color/brand_primary_container</item>
+  <item name="colorOnPrimaryContainer">@color/brand_on_primary_container</item>
+  <item name="colorSecondaryContainer">@color/brand_secondary_container</item>
+  <item name="colorOnSecondaryContainer">@color/brand_on_secondary_container</item>
+  <item name="colorSurface">@color/brand_surface</item>
+  <item name="colorOnSurface">@color/brand_on_surface</item>
+  <item name="colorOnSurfaceVariant">@color/brand_on_surface_variant</item>
+  <item name="colorSurfaceContainer">@color/brand_container</item>
+  <item name="colorSurfaceContainerHigh">@color/brand_container_high</item>
+  <item name="android:colorBackground">?attr/colorSurface</item>
+  <item name="android:windowBackground">?attr/colorSurface</item>
+  <item name="android:fontFamily">sans</item>
+  <item name="android:windowActionModeOverlay">true</item>
+  <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
+  <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
+ </style>
+ <style name="Widget.WalkieTalkie.Talk" parent="Widget.Material3Expressive.Button">
+  <item name="materialSizeOverlay">@style/SizeOverlay.Material3Expressive.Button.Large</item>
+  <item name="android:minHeight">80dp</item>
+ </style>
+ <style name="Widget.WalkieTalkie.Action" parent="Widget.Material3Expressive.Button">
+  <item name="materialSizeOverlay">@style/SizeOverlay.Material3Expressive.Button.Medium</item>
+  <item name="android:minHeight">56dp</item>
+ </style>
+ <style name="Widget.WalkieTalkie.Icon" parent="Widget.Material3Expressive.Button.IconButton.Tonal">
+  <item name="android:minWidth">48dp</item>
+  <item name="android:minHeight">48dp</item>
+ </style>
+ <style name="ShapeAppearance.WalkieTalkie.Card" parent="ShapeAppearance.Material3.Corner.ExtraLarge">
+  <item name="cornerSize">28dp</item>
+ </style>
+</resources>
