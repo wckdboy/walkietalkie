@@ -71,9 +71,10 @@ python scripts/bootstrap.py
 
 Windows: use gradlew.bat. Bootstrap retrieves checksum-pinned llama.cpp b11960 Snapdragon binaries, matching commit 8642541b255bfb5dc39cd351a178be09013a55d6 / v0.8.0.
 
-With an Android 15 Google APIs x86_64 emulator supporting ARM translation running:
+CI preserves the arm64 release APK, then builds a speech-capable x86_64 APK for native emulator testing. The emulator build deliberately omits the Snapdragon-only LLM library. To run those checks on an Android 15 Google APIs x86_64 emulator:
 
 ~~~sh
+./gradlew -PtestAbi=x86_64 assembleDebug assembleDebugAndroidTest
 bash scripts/emulator-smoke.sh
 ~~~
 
