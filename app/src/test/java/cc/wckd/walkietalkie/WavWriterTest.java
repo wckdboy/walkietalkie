@@ -6,6 +6,16 @@ import java.nio.*;
 import java.nio.file.*;
 
 public class WavWriterTest {
+ @Test public void reopeningAfterInterruptedCaptureRepairsPlaybackLength() throws Exception {
+  File file=File.createTempFile("walkietalkie-recover",".wav");
+  try{
+   try(WavWriter writer=new WavWriter(file)){writer.write(new short[]{10,20},2);}
+   try(RandomAccessFile interrupted=new RandomAccessFile(file,"rw")){interrupted.seek(interrupted.length());interrupted.write(new byte[]{30,0,40,0});}
+   WavWriter.repair(file);
+   ByteBuffer bytes=ByteBuffer.wrap(Files.readAllBytes(file.toPath())).order(ByteOrder.LITTLE_ENDIAN);
+   assertEquals(8,bytes.getInt(40));assertEquals(40,bytes.getShort(50));assertEquals(52,file.length());
+  }finally{file.delete();}
+ }
  @Test public void resumePreservesSamplesAndRepairsHeader() throws Exception {
   File file=File.createTempFile("walkietalkie-audio",".wav");
   try{

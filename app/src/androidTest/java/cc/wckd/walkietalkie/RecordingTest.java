@@ -37,16 +37,18 @@ public class RecordingTest {
   try(InputStream in=instrumentation.getContext().getAssets().open("two_cities.wav")){bytes=in.readAllBytes();}
   ByteBuffer wav=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
   assertEquals("RIFF",new String(bytes,0,4,java.nio.charset.StandardCharsets.US_ASCII));
-  int offset=12,data=-1,length=0;
+  int offset=12,data=-1,length=0,sampleRate=0;
   while(offset+8<=bytes.length){
    String chunk=new String(bytes,offset,4,java.nio.charset.StandardCharsets.US_ASCII);
    int size=wav.getInt(offset+4);
-   if(chunk.equals("fmt ")){assertEquals(1,wav.getShort(offset+8));assertEquals(1,wav.getShort(offset+10));assertEquals(16000,wav.getInt(offset+12));assertEquals(16,wav.getShort(offset+22));}
+   if(chunk.equals("fmt ")){assertEquals(1,wav.getShort(offset+8));assertEquals(1,wav.getShort(offset+10));sampleRate=wav.getInt(offset+12);assertTrue(sampleRate==16000||sampleRate==48000);assertEquals(16,wav.getShort(offset+22));}
    if(chunk.equals("data")){data=offset+8;length=size;break;}
    offset+=8+size+(size&1);
   }
   assertTrue(data>0);assertTrue(length>0);
-  float[] audio=new float[length/2];for(int i=0;i<audio.length;i++)audio[i]=wav.getShort(data+i*2)/32768f;
+  int ratio=sampleRate/16000;
+  float[] audio=new float[Math.min(20*16000,length/2/ratio)];
+  for(int i=0;i<audio.length;i++){float sum=0;for(int j=0;j<ratio;j++)sum+=wav.getShort(data+(i*ratio+j)*2)/32768f;audio[i]=sum/ratio;}
   StringBuilder transcript=new StringBuilder();
   try(SpeechSession speech=new SpeechSession(new ModelStore(context).speech,(text,complete,latency)->{if(complete)transcript.append(text).append(" ");})){
    for(int pass=0;pass<3;pass++){

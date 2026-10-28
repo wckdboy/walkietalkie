@@ -50,7 +50,7 @@ final class SessionStore {
    Session s=new Session();s.id=id;s.title=object.optString("title");s.kind=object.optString("kind","recording");s.created=object.getLong("created");s.updated=object.optLong("updated",s.created);s.durationMs=object.optLong("durationMs");s.pinned=object.optBoolean("pinned");
    JSONArray entries=object.getJSONArray("entries");
    for(int i=0;i<entries.length();i++){JSONObject e=entries.getJSONObject(i);s.entries.add(new Entry(e.getString("role"),e.getString("text"),e.optLong("start"),e.optLong("end")));}
-   File audio=audio(s);if(audio.exists())s.durationMs=Math.max(s.durationMs,Math.max(0,audio.length()-44)*1000/32000);
+   File audio=audio(s);if(audio.exists()){WavWriter.repair(audio);s.durationMs=Math.max(s.durationMs,Math.max(0,audio.length()-44)*1000/32000);}
    return s;
   }catch(JSONException error){throw new IOException("Could not read transcript",error);}
  }

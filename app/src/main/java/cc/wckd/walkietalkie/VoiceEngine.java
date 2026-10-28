@@ -52,6 +52,7 @@ final class VoiceEngine {
   int id=epoch.incrementAndGet();
   worker.execute(()->{
    try {
+    if(id!=epoch.get()||closed)return;
     if(download) {ui.state("setup","Downloading models. Keep WalkieTalkie open.");store.install(ui::progress);}
     if(id!=epoch.get() || closed)return;
     if(!store.speechReady()){ui.state("missing","Download the speech model once to record offline.");return;}
@@ -61,7 +62,7 @@ final class VoiceEngine {
     ui.backend("Recording: Moonshine on CPU. Reply acceleration loads when needed.");
     loaded=true;
     if(id==epoch.get())ui.state("ready","Everything stays on this phone.");
-   }catch(Throwable e){loaded=false;report(e);}
+   }catch(Throwable e){loaded=false;if(id==epoch.get())report(e);}
   });
  }
  private void onTranscript(String text,boolean complete,int latencyMs) {
@@ -125,7 +126,7 @@ final class VoiceEngine {
   });
  }
  void finishListening(){turnStart=SystemClock.elapsedRealtime();recording=false;}
- void send(String text){int id=epoch.incrementAndGet();sttMs=0;turnStart=SystemClock.elapsedRealtime();ui.user(text);worker.execute(()->{if(id==epoch.get()&&loaded)try{respond(text,id);}catch(Throwable e){report(e);}});}
+ void send(String text){int id=epoch.incrementAndGet();sttMs=0;turnStart=SystemClock.elapsedRealtime();ui.user(text);worker.execute(()->{if(id==epoch.get()&&loaded)try{respond(text,id);}catch(Throwable e){if(id==epoch.get())report(e);}});}
  void reflect(String transcript,String instruction){
   int id=epoch.incrementAndGet();turnStart=SystemClock.elapsedRealtime();ui.user(instruction);
   worker.execute(()->{

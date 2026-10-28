@@ -71,5 +71,11 @@ public class UiSmokeTest {
   assertEquals(s.id,SessionStore.sorted(Arrays.asList(chat,restored),"","all",2).get(0).id);
   assertEquals(1,SessionStore.sorted(Arrays.asList(chat,restored),"","chat",0).size());
   store.delete(chat);assertFalse(store.list().stream().anyMatch(item->item.id.equals(chat.id)));
+  File damaged=new File(context.getNoBackupFilesDir(),"sessions/"+UUID.randomUUID()+".json");
+  try{
+   try(FileOutputStream out=new FileOutputStream(damaged)){out.write("{broken".getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+   assertTrue(store.list().stream().anyMatch(item->item.id.equals(s.id)));
+   assertEquals(1,store.unreadableCount);assertTrue(damaged.exists());
+  }finally{assertTrue(damaged.delete());}
  }
 }
