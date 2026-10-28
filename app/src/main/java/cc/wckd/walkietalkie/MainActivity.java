@@ -137,7 +137,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   boolean has=!session.entries.isEmpty()||session.durationMs>0;
   intro.setVisibility(has?View.GONE:View.VISIBLE);
   title.setText(session.displayTitle());title.setVisibility(has?View.VISIBLE:View.GONE);
-  timer.setText(SessionStore.stamp(session.durationMs));timer.setContentDescription("Recording duration "+SessionStore.stamp(session.durationMs));timer.setVisibility(recordingMode()||session.durationMs>0?View.VISIBLE:View.GONE);
+  timer.setText(SessionStore.stamp(session.durationMs));timer.setContentDescription("Recording duration "+SessionStore.stamp(session.durationMs));timer.setVisibility((recordingMode()||session.durationMs>0)&&(state.equals("ready")||active()||has)?View.VISIBLE:View.GONE);
   suggestions.setVisibility(!recordingMode()&&!has&&state.equals("ready")?View.VISIBLE:View.GONE);
   recordingActions.setVisibility(has&&!active()?View.VISIBLE:View.GONE);
   play.setVisibility(store.audio(session).length()>44?View.VISIBLE:View.GONE);
@@ -199,8 +199,8 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
  }
  private void settings(){
   hideKeyboard();LinearLayout panel=column();RadioGroup choices=new RadioGroup(this);
-  for(int i=0;i<modes.length;i++){MaterialRadioButton option=new MaterialRadioButton(this);option.setId(100+i);option.setText(modes[i]);option.setMinHeight(dp(56));choices.addView(option);}
-  choices.check(100+mode);panel.addView(text("Acceleration",com.google.android.material.R.style.TextAppearance_Material3_TitleMedium_Emphasized));panel.addView(choices);space(panel,12);
+  for(int i=0;i<modes.length;i++){MaterialRadioButton option=new MaterialRadioButton(this);option.setId(View.generateViewId());option.setTag(i);option.setText(modes[i]);option.setMinHeight(dp(56));choices.addView(option);if(i==mode)choices.check(option.getId());}
+  panel.addView(text("Acceleration",com.google.android.material.R.style.TextAppearance_Material3_TitleMedium_Emphasized));panel.addView(choices);space(panel,12);
   panel.addView(text("NPU modes need OnePlus FastRPC support. Mixed mode can be slower. Speech uses CPU.",com.google.android.material.R.style.TextAppearance_Material3_BodySmall));space(panel,16);
   MaterialSwitch fillers=new MaterialSwitch(this);fillers.setText("Conversational fillers");fillers.setMinHeight(dp(56));fillers.setChecked(engine.fillers);panel.addView(fillers);
   panel.addView(text("Short, varied fillers make spoken replies feel more natural.",com.google.android.material.R.style.TextAppearance_Material3_BodyMedium));space(panel,16);
@@ -210,7 +210,7 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
   MaterialButton apply=button("Apply settings",R.style.Widget_WalkieTalkie_Action);panel.addView(apply);
   BottomSheetDialog dialog=sheet("Make it yours",panel);
   models.setOnClickListener(v->{dialog.dismiss();models();});
-  apply.setOnClickListener(v->{int next=choices.getCheckedRadioButtonId()-100;engine.fillers=fillers.isChecked();getPreferences(0).edit().putInt("backend",next).putBoolean("fillers",engine.fillers).apply();boolean changed=mode!=next;mode=next;dialog.dismiss();if(changed||!engine.ready()){state("loading","Opening your selected engine…");engine.prepare(false,mode);}else updateBackend();});
+  apply.setOnClickListener(v->{int next=(Integer)choices.findViewById(choices.getCheckedRadioButtonId()).getTag();engine.fillers=fillers.isChecked();getPreferences(0).edit().putInt("backend",next).putBoolean("fillers",engine.fillers).apply();boolean changed=mode!=next;mode=next;dialog.dismiss();if(changed||!engine.ready()){state("loading","Opening your selected engine…");engine.prepare(false,mode);}else updateBackend();});
  }
  private void models(){
   LinearLayout panel=column();panel.addView(text("Download compatible Qwen models directly from Hugging Face. Downloads resume and are verified with SHA-256. Speech models are shared across choices.",com.google.android.material.R.style.TextAppearance_Material3_BodyMedium));space(panel,16);
@@ -227,12 +227,14 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
  private void library(){
   stopPlayback();hideKeyboard();LinearLayout panel=column();
   TextInputLayout searchBox=new TextInputLayout(this);searchBox.setHint("Search titles and transcripts");TextInputEditText search=new TextInputEditText(searchBox.getContext());search.setSingleLine(true);searchBox.addView(search);panel.addView(searchBox);space(panel,12);
-  Spinner filter=new Spinner(this);filter.setMinimumHeight(dp(48));filter.setContentDescription("Filter recordings or chats");filter.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"All recordings & chats","Recordings","Conversations"}));panel.addView(filter);
-  Spinner sort=new Spinner(this);sort.setMinimumHeight(dp(48));sort.setContentDescription("Sort library");sort.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Recently updated","Oldest first","Title A–Z","Longest recording"}));sort.setSelection(getPreferences(0).getInt("sort",0));panel.addView(sort);space(panel,12);
+  String[] filters={"All recordings & chats","Recordings","Conversations"},sorts={"Recently updated","Oldest first","Title A–Z","Longest recording"};
+  int[] selection={0,Math.max(0,Math.min(3,getPreferences(0).getInt("sort",0)))};
+  TextInputLayout filterBox=(TextInputLayout)getLayoutInflater().inflate(R.layout.dropdown,null);filterBox.setHint("Show");MaterialAutoCompleteTextView filter=(MaterialAutoCompleteTextView)filterBox.getEditText();filter.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,filters));filter.setText(filters[0],false);panel.addView(filterBox);space(panel,12);
+  TextInputLayout sortBox=(TextInputLayout)getLayoutInflater().inflate(R.layout.dropdown,null);sortBox.setHint("Sort by");MaterialAutoCompleteTextView sort=(MaterialAutoCompleteTextView)sortBox.getEditText();sort.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,sorts));sort.setText(sorts[selection[1]],false);panel.addView(sortBox);space(panel,12);
   LinearLayout results=column();panel.addView(results);TextView loading=text("Opening your library…",com.google.android.material.R.style.TextAppearance_Material3_BodyLarge);results.addView(loading);
   BottomSheetDialog dialog=sheet("Your recordings & chats",panel);saveNow();
   List<SessionStore.Session> cached=new ArrayList<>();
-  Runnable render=()->{results.removeAllViews();String kind=switch(filter.getSelectedItemPosition()){case 1->"recording";case 2->"chat";default->"all";};List<SessionStore.Session> items=SessionStore.sorted(cached,search.getText()==null?"":search.getText().toString(),kind,sort.getSelectedItemPosition());if(items.isEmpty())results.addView(text("No recordings here yet. Your next thought can be the first.",com.google.android.material.R.style.TextAppearance_Material3_BodyLarge));
+  Runnable render=()->{results.removeAllViews();String kind=switch(selection[0]){case 1->"recording";case 2->"chat";default->"all";};List<SessionStore.Session> items=SessionStore.sorted(cached,search.getText()==null?"":search.getText().toString(),kind,selection[1]);if(items.isEmpty())results.addView(text("No recordings here yet. Your next thought can be the first.",com.google.android.material.R.style.TextAppearance_Material3_BodyLarge));
    for(SessionStore.Session item:items){
     LinearLayout row=column();row.setPadding(dp(16),dp(16),dp(16),dp(16));surface(row,com.google.android.material.R.attr.colorSurfaceContainer,24);
     MaterialButton open=button((item.pinned?"★  ":"")+item.displayTitle(),com.google.android.material.R.style.Widget_Material3Expressive_Button_TextButton);open.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);open.setMaxLines(3);row.addView(open);
@@ -242,8 +244,8 @@ public class MainActivity extends AppCompatActivity implements VoiceEngine.Liste
     more.setOnClickListener(v->{dialog.dismiss();sessionMenu(item);});results.addView(row);space(results,10);
    }
   };
-  AdapterView.OnItemSelectedListener change=new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> a,View v,int p,long id){getPreferences(0).edit().putInt("sort",sort.getSelectedItemPosition()).apply();render.run();}public void onNothingSelected(AdapterView<?> a){}};
-  filter.setOnItemSelectedListener(change);sort.setOnItemSelectedListener(change);
+  filter.setOnItemClickListener((parent,v,position,id)->{selection[0]=position;render.run();});
+  sort.setOnItemClickListener((parent,v,position,id)->{selection[1]=position;getPreferences(0).edit().putInt("sort",position).apply();render.run();});
   search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){render.run();}public void afterTextChanged(Editable e){}});
   disk.execute(()->{try{List<SessionStore.Session> items=store.list();main.post(()->{cached.addAll(items);render.run();});}catch(IOException error){main.post(()->loading.setText("Could not open library: "+error.getMessage()));}});
  }
