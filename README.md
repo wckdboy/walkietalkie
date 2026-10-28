@@ -4,6 +4,17 @@
 
 Record long thoughts or meetings, follow a live transcription feed, and pause to invite a spoken reflection. Audio, transcripts and conversations stay in private storage on your phone.
 
+## Reliability fixes in 0.2.1
+
+- Recording opens Moonshine without initializing Qwen, Kokoro or an OpenCL backend. Reply models load only when needed.
+- Checked speech handles and per-stream completion tracking fix retry/resume behavior. A small separate JNI bridge releases audio buffers after every call, avoiding the upstream 0.1.5 add-audio buffer leak.
+- Native teardown is serialized across Activity recreation so an old Activity cannot unload a new engine.
+- Microphone format/start errors, audio-focus rejection, null transcript text and stale callbacks after destruction are handled.
+- WAV headers recover after interrupted capture. One damaged transcript no longer blocks the rest of the library.
+- Engine → Copy diagnostics includes device/version, the last recording operation and Android's previous-exit reason. No audio or transcript is included or uploaded.
+
+The exact exit reported on the OnePlus 15 has not been captured in a device log. These fixes address confirmed code defects; the emulator cannot validate the OnePlus OpenCL/FastRPC drivers.
+
 ## What is new in 0.2
 
 - Material 3 Expressive using Google's stable **Material Components 1.14.0** library: morphing buttons, wavy download progress, loading indicators, dynamic wallpaper colors, light/dark themes and accessible touch targets.
@@ -39,7 +50,7 @@ Record long thoughts or meetings, follow a live transcription feed, and pause to
 
 Ollama and CTranslate2 are not bundled. Native llama.cpp keeps conversations on the phone. Qwen is prompted to use short, varied conversational fillers; the Engine sheet can disable them.
 
-GPU is the default. NPU/mixed modes use the Snapdragon backend's Hexagon v81 skeleton, targeting OnePlus 15 / Snapdragon 8 Elite Gen 5. OEM OpenCL/FastRPC availability determines whether these modes work. Mixed mode executes layers sequentially and can be slower. The packaged runtime requires the OEM OpenCL library even in CPU mode; the simulator is for UI/storage checks, not AI performance.
+GPU is the default. NPU/mixed modes use the Snapdragon backend's Hexagon v81 skeleton, targeting OnePlus 15 / Snapdragon 8 Elite Gen 5. OEM OpenCL/FastRPC availability determines whether these modes work. Mixed mode executes layers sequentially and can be slower. The packaged runtime requires the OEM OpenCL library even in CPU mode; recording and Moonshine transcription can run in the emulator independently. OnePlus GPU/NPU reply acceleration still requires physical-device testing.
 
 No sub-50 ms latency claim is made. Engine details show STT decode, first token, TTS chunk and first audio queued. Queued audio is not an acoustic measurement.
 
@@ -66,7 +77,7 @@ With an Android 15 Google APIs x86_64 emulator supporting ARM translation runnin
 bash scripts/emulator-smoke.sh
 ~~~
 
-Emulator checks launch the real app, inspect setup and model selection, restore a seeded recording, exercise the feed and library, and verify storage/search/delete. Transcript/reply screenshots use explicit fixture data and do not establish STT, LLM, TTS or NPU performance. Device microphone testing remains necessary.
+Emulator checks launch the real app with animations enabled, exercise UI/storage and corrupted metadata recovery, transcribe a pinned upstream speech fixture three times across fresh streams, reject missing microphone permission, then tap the actual Record button with the default GPU preference. They check captured PCM, pause/resume, backgrounding and Activity recreation without Qwen installed. Screenshot transcript/reply text remains fixture data. Physical OnePlus microphone quality and GPU/NPU reply performance are not measured.
 
 APK: app/build/outputs/apk/debug/app-debug.apk. CI uploads APK and emulator screenshots/reports as separate artifacts. Bootstrap generates a local demo signing key; keys differ between CI runs/checkouts. Export your data before uninstalling a differently signed previous demo. Use a stable private signing key for a real release.
 
@@ -77,7 +88,9 @@ APK: app/build/outputs/apk/debug/app-debug.apk. CI uploads APK and emulator scre
 - SessionStore.java / WavWriter.java: atomic metadata persistence and incremental audio.
 - ModelCatalog.java / ModelStore.java: compatible Hugging Face catalog, resuming and integrity checks.
 - Conversation.java / walkietalkie.cpp: bounded prompts, decoding and native inference.
-- UiSmokeTest.java: real Android UI/storage smoke checks and screenshots.
+- SpeechSession.java / speech.cpp: checked single-stream speech inference and owned audio buffers.
+- Diagnostics.java: local Android exit details.
+- UiSmokeTest.java / RecordingTest.java: real Android UI/storage, native transcription and microphone regression checks.
 
 ## Licenses and primary references
 

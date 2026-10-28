@@ -79,6 +79,7 @@ final class VoiceEngine {
    ui.state("thinking","Opening the reply model. The first GPU load compiles kernels.");
    Diagnostics.phase(context,"Loading reply backend "+requestedMode);
    NativeLlm.ensureLinked();
+   llmOwner=null;loadedMode=-1;loadedPath="";
    String backend=NativeLlm.load(store.llm.getAbsolutePath(),4,requestedMode,context.getApplicationInfo().nativeLibraryDir,context.getCacheDir().getAbsolutePath());
    llmOwner=this;loadedMode=requestedMode;loadedPath=store.llm.getAbsolutePath();ui.backend(backend);
   }
