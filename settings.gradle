@@ -1,4 +1,10 @@
 pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories {
+  exclusiveContent {
+   forRepository { maven { url = uri('.bootstrap/maven'); metadataSources { mavenPom(); artifact() } } }
+   filter { includeModule('ai.moonshine', 'moonshine-voice') }
+  }
+  google(); mavenCentral()
+ } }
 rootProject.name = 'WalkieTalkie'
 include ':app'

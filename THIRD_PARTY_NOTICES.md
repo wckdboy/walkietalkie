@@ -13,3 +13,11 @@ The Hexagon device code comes from the official llama.cpp release. The phone sup
 ## UI and optional smaller models
 
 Material Components for Android 1.14.0 and AndroidX Test are Apache-2.0. Qwen2.5-0.5B-Instruct-GGUF and Qwen2.5-1.5B-Instruct-GGUF are Apache-2.0; their model cards are linked in the README. The existing Qwen Research License notice remains applicable to 3B.
+
+## Compatible speech runtime
+
+The arm64 build of Moonshine Voice 0.1.5 replaces only its ONNX Runtime library
+with ORT 1.23.2 (commit a83fc4d58cb48eb68890dd689f94f28288cf2278), built with
+KleidiAI disabled and Moonshine's reduced operator configuration. ONNX Runtime
+is MIT; see licenses/onnxruntime.txt and licenses/onnxruntime-third-party.txt
+for upstream license/notices. Other Moonshine AAR entries are unchanged.

@@ -1,15 +1,15 @@
-A quieter recorder, with speech-crash containment.
+# WalkieTalkie 0.2.3: arm64 speech compatibility candidate
 
-- Compact timer and Record / Pause / Resume control at the bottom.
-- More space for the transcript; removed decorative onboarding, repeated status paragraphs and model details from the recording screen.
-- Keyboard appears in Chat only. Play, Summary, Ask and Share remain available after pausing.
-- Settings uses one engine selector; privacy details and diagnostics are available on request.
-- Moonshine runs in a separate process with a bounded decoding queue. If it stops or falls behind, WAV capture continues and the app shows a short warning. Resume attempts transcription again.
-- Native crash diagnostics now show process, signal and bounded stack metadata when Android supplies it. No audio, transcripts, raw memory or system logs are copied.
-- Android 16 emulator coverage includes real Moonshine transcription, denied microphone permission, pause/resume, backgrounding, recreation, and deliberate speech-process SIGABRT while recording. Unit/lint checks gate publication.
+- Rebuilds Moonshine's ONNX Runtime 1.23.2 for arm64 without KleidiAI, avoiding
+  the SME dispatch path implicated by the OnePlus Android 16 SIGILL report.
+- Keeps Moonshine 0.1.5 APIs, models, reduced operators, speech-process isolation
+  and saved-audio recovery. Other ABIs are unchanged.
+- Verifies the runtime bytes inside the arm64 APK before uploading the artifact.
+- May trade some CPU throughput for compatibility. Physical OnePlus recording
+  and Kokoro playback still need validation; emulator success is not arm64 proof.
 
-Your Reason 5 report identifies a native crash, but does not identify its native function. This release contains speech-process failures; physical OnePlus GPU/NPU reply drivers remain unverified.
-
-Install the arm64 APK on Android 12+. **Export any recordings and transcripts you want to keep before uninstalling the previous demo.** CI currently generates a new demo signing key per build, so replacing a previous APK may require uninstalling it. Uninstalling removes local recordings and downloaded models.
-
-All inference stays on the phone after model download. No sub-50 ms performance claim is made.
+Release signing requires the stable project key; it no longer uses a newly
+generated demo key each run. The first stable-key APK may not update an older
+demo APK. Export recordings before uninstalling a differently signed previous
+build. This is a prerelease candidate,
+not confirmation that the reported phone crash is resolved.
