@@ -4,6 +4,18 @@
 
 Record long thoughts or meetings, follow a live transcription feed, and pause to invite a spoken reflection. Audio, transcripts and conversations stay in private storage on your phone.
 
+## 0.2.3: compatible arm64 speech runtime
+
+The Android arm64 build replaces Moonshine 0.1.5's bundled ONNX Runtime with
+an operator-reduced build of the **same ORT 1.23.2 commit, with KleidiAI disabled**.
+This avoids the SME instruction-dispatch path implicated by the OnePlus SIGILL.
+It preserves Moonshine's ABI and models and may trade some throughput for compatibility.
+Speech-process isolation and WAV recovery remain in place.
+
+This is a candidate fix until recording and Kokoro playback pass on the physical
+OnePlus. Emulator tests cannot validate arm64 instruction dispatch.
+See [speech runtime repair](docs/speech-runtime-repair.md) for evidence and checks.
+
 ## 0.2.2: clearer recording and speech isolation
 
 The recorder now keeps a timer and one main control at the bottom. Transcript rows are plain and timestamped; assistant replies retain their Material container. The keyboard is limited to Chat. Model, privacy and diagnostic details live in Settings.
@@ -73,11 +85,13 @@ Hugging Face downloads come from the official public Qwen repositories and requi
 JDK 21, Python 3.10+, Android SDK 36, Build Tools 36.0.0, NDK 28.2.13676358 and CMake 3.31.6.
 
 ~~~sh
+python -m pip install cmake==3.31.6 ninja packaging numpy sympy flatbuffers
+python scripts/build-safe-speech.py --jobs 4
 python scripts/bootstrap.py
 ./gradlew assembleDebug assembleDebugAndroidTest testDebugUnitTest lintDebug
 ~~~
 
-Windows: use gradlew.bat. Bootstrap retrieves checksum-pinned llama.cpp b11960 Snapdragon binaries, matching commit 8642541b255bfb5dc39cd351a178be09013a55d6 / v0.8.0.
+The native repair build requires Linux or macOS (bash). On Windows, build it in WSL or CI; Gradle itself can use gradlew.bat. Bootstrap retrieves checksum-pinned llama.cpp b11960 Snapdragon binaries, matching commit 8642541b255bfb5dc39cd351a178be09013a55d6 / v0.8.0.
 
 CI preserves the arm64 release APK, then builds a speech-capable x86_64 APK for native emulator testing. The emulator build deliberately omits the Snapdragon-only LLM library. To run those checks on an Android 16 Google APIs x86_64 emulator:
 
@@ -88,7 +102,9 @@ bash scripts/emulator-smoke.sh
 
 Emulator checks launch the real app with animations enabled, exercise UI/storage and corrupted metadata recovery, transcribe a pinned upstream speech fixture three times across fresh streams, reject missing microphone permission, then tap the actual Record button with the default GPU preference. They check captured PCM, pause/resume, backgrounding and Activity recreation without Qwen installed, then deliberately SIGABRT the speech process and verify continued recording, a valid WAV header, and recognition recovery on resume. Screenshot transcript/reply text remains fixture data. Physical OnePlus microphone quality and GPU/NPU reply performance are not measured.
 
-APK: app/build/outputs/apk/debug/app-debug.apk. CI uploads APK and emulator screenshots/reports as separate artifacts. Bootstrap generates a local demo signing key; keys differ between CI runs/checkouts. Export your data before uninstalling a differently signed previous demo. Use a stable private signing key for a real release.
+Debug APK: app/build/outputs/apk/debug/app-debug.apk. Bootstrap creates a local demo key for debug/test builds only. Release builds are unsigned until the release job signs them with the stable project key from GitHub Actions secrets. Missing signing secrets fail the release; there is no demo-key fallback. See [release signing](docs/release-signing.md).
+
+A newly established stable key does not match an older randomly signed demo. Export recordings before uninstalling an incompatible previous build. Future releases using the same stable key can update each other normally.
 
 ## Source map
 

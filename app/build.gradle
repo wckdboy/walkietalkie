@@ -10,13 +10,14 @@ android {
   minSdk 31
   testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
   targetSdk 36
-  versionCode 4
-  versionName '0.2.2-clear-recording'
+  versionCode 5
+  versionName '0.2.3-safe-speech'
   ndk { abiFilters (project.findProperty('testAbi') ?: 'arm64-v8a') }
   externalNativeBuild { cmake { cppFlags '-std=c++17'; arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON' } }
  }
  signingConfigs { demo { storeFile file('../demo.keystore'); storePassword 'android'; keyAlias 'murmur'; keyPassword 'android' } }
- buildTypes { debug { signingConfig signingConfigs.demo }; release { signingConfig signingConfigs.demo; minifyEnabled false } }
+ // Release APKs are signed only in the guarded release job.
+ buildTypes { debug { signingConfig signingConfigs.demo }; release { minifyEnabled false } }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
  externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.31.6' } }
  packaging { jniLibs { useLegacyPackaging = true; keepDebugSymbols += ['**/libggml-htp-*.so']; pickFirsts += ['**/libc++_shared.so'] } }
@@ -27,7 +28,7 @@ dependencies {
  androidTestImplementation 'androidx.test:runner:1.7.0'
  androidTestImplementation 'androidx.test.ext:junit:1.3.0'
  androidTestImplementation 'androidx.test:core:1.7.0'
- implementation 'ai.moonshine:moonshine-voice:0.1.5'
+ implementation 'ai.moonshine:moonshine-voice:0.1.5-wckd-cpu1'
  implementation 'com.squareup.okhttp3:okhttp:4.12.0'
  testImplementation 'junit:junit:4.13.2'
 }

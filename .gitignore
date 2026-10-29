@@ -10,3 +10,5 @@ third_party/llama.cpp-*/
 app/src/main/jniLibs/
 third_party/llama-include/
 .bootstrap/
+
+__pycache__/
